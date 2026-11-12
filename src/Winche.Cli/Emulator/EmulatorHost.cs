@@ -133,7 +133,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.KeyEncryptionSecret = "winche-emulator-local-only-signing-key-secret";   // local data, a fixed secret
             o.EmailPassword(p => p.MinLength = 6);
             o.Anonymous();
-            o.Email(e => e.AppName = "your app");   // nothing is sent: links are printed (EmulatorEmailSender)
+            o.Email(e => e.AppName = "Winche emulator");   // nothing is sent: links are printed (EmulatorEmailSender)
         });
         builder.Services.AddSingleton<Winche.Auth.Email.IAuthEmailSender>(new EmulatorEmailSender(output, issuer, () => baseUrl));
         builder.Services.AddAuthentication().AddWincheTokens(t => t.TrustWincheAuth());
