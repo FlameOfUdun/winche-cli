@@ -185,7 +185,7 @@ Winche emulator is running — rules from database.rules, storage.rules, reloade
   or the WebSocket's `?access_token=`.
 - **Each request** is printed with who made it and the result; `--quiet` turns that off, `--verbose` adds the
   servers' own logs.
-- **The console** has the Logs tab and the Database / Storage Logs sub-tabs, keeping Information and up.
+- **The console** has the Logs tab, the Database / Storage Logs sub-tabs (Information and up) and the Database History sub-tab (who changed what).
 - `--port` (default 9090) and `--host` (default `localhost`; `0.0.0.0` to reach it from a phone or another machine).
 
 `winche emulators exec "<command>"` starts the emulators, runs the command with `WINCHE_EMULATOR`,

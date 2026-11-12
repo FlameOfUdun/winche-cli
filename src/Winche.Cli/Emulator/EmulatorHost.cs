@@ -125,6 +125,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.ConnectionString = connection;
             o.MapClaims(TestTokens.Claims);
             o.UseRules(databaseRules);
+            o.KeepHistory(TimeSpan.FromDays(7));   // the console's History tab
         }).AddWincheDatabaseWsApi();
         builder.Services.AddWincheStorage(o =>
         {
@@ -138,7 +139,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.ConnectionString = connection;
             o.SeedAdminEmail = ConsoleEmail;
             o.SeedAdminPassword = ConsolePassword;
-            o.AddDatabaseTab(b => b.UseLogs());
+            o.AddDatabaseTab(b => { b.UseLogs(); b.UseHistory(); });
             o.AddStorageTab(b => b.UseLogs());
             o.AddLogsTab(l =>
             {
