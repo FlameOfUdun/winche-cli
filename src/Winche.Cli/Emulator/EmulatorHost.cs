@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Testcontainers.PostgreSql;
 using Winche.Auth.AspNetCore;
 using Winche.Auth.DependencyInjection;
+using Winche.Config;
 using Winche.Console;
 using Winche.Database.AspNetCore.DependencyInjection;
 using Winche.Database.AspNetCore.Rest.DependencyInjection;
@@ -141,7 +142,14 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.Apple(a => { a.Audiences = [TestTokens.IdTokenAudience]; a.AllowUnsignedTokensForTesting = true; });   // nothing is sent: links are printed (EmulatorEmailSender)
         });
         builder.Services.AddSingleton<Winche.Auth.Email.IAuthEmailSender>(new EmulatorEmailSender(output, issuer, () => baseUrl));
-        builder.Services.AddAuthentication().AddWincheTokens(t => t.TrustWincheAuth());
+        // Settings the console can change (trusted providers and token mapping among them), kept in the emulator's database.
+        builder.Services.AddWincheConfig(o =>
+        {
+            o.ConnectionString = connection;
+            o.MasterKey = "winche-emulator-local-only-master-key-0123456789";
+            o.PollInterval = TimeSpan.FromSeconds(2);
+        });
+        builder.Services.AddAuthentication().AddWincheTokens(t => t.TrustWincheAuth().UseSettings());
         static IReadOnlyDictionary<string, object?>? Claims(HttpContext http) => WincheClaims.From(http) ?? TestTokens.Claims(http);
 
         builder.Services.AddWincheDatabase(o =>
