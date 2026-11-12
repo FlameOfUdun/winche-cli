@@ -132,6 +132,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         {
             o.ConnectionString = connection;
             o.Issuer = issuer;
+            o.UseSettings();   // sign-in methods, lifetimes and email changeable in the console
             o.KeyEncryptionSecret = "winche-emulator-local-only-signing-key-secret";   // local data, a fixed secret
             o.EmailPassword(p => p.MinLength = 6);
             o.Anonymous();
