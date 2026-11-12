@@ -24,6 +24,7 @@ internal static class CliApp
           rules rollback <v>   Make version <v> active again (saved as a new version)
           rules diff           Show how the rules files differ from what the console enforces
           rules pull           Write the console's live rules into the rules files
+          lsp                  Run the language server for editors (the Winche VS Code extension starts it)
 
         Options:
           --console <url>      Console URL, e.g. https://api.example.com/_console (or WINCHE_CONSOLE, or winche.json)
@@ -73,6 +74,7 @@ internal static class CliApp
                 "rules deploy" => await run.DeployAsync(ct),
                 "rules diff" => await run.DiffAsync(ct),
                 "rules pull" => await run.PullAsync(ct),
+                "lsp" => await new LanguageServer(Console.OpenStandardInput(), Console.OpenStandardOutput(), env, http).RunAsync(ct),
                 _ => throw new CliException($"Unknown command '{string.Join(' ', a.Positional)}'. Run: winche --help", 2),
             };
         }

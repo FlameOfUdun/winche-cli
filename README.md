@@ -134,6 +134,14 @@ are refreshed as needed.
 - **CI:** pass a bearer token for the console client with `--token` or `WINCHE_TOKEN`, and the console with
   `--console` or `WINCHE_CONSOLE`.
 
+## Editors
+
+`winche lsp` is a Language Server Protocol server over stdin/stdout for `.rules` and `.rules.test` files:
+errors and warnings as you type (the same checks as `rules validate`), test results on each `test` block and
+on failing lines (re-run as you edit either file), formatting (left alone when the file has comments, which
+the console doesn't keep), and the document fields the console samples for a match pattern (`winche/fields`,
+when signed in). The [Winche VS Code extension](https://github.com/FlameOfUdun/winche-vscode) starts it.
+
 ## Requirements
 
 - A host app running Winche.Console 4.0.0+ in **Keycloak mode** with the rules editor enabled

@@ -21,9 +21,13 @@ internal static class RuleTests
 
     /// <summary>Parses <paramref name="testFile"/> and runs every check against <paramref name="ruleSet"/>.</summary>
     /// <exception cref="RuleTestSyntaxException">The test file doesn't parse.</exception>
-    public static async Task<IReadOnlyList<Outcome>> RunAsync(string subsystem, RuleSet ruleSet, string testFile, CancellationToken ct)
+    public static Task<IReadOnlyList<Outcome>> RunAsync(string subsystem, RuleSet ruleSet, string testFile, CancellationToken ct) =>
+        RunTextAsync(subsystem, ruleSet, File.ReadAllText(testFile), ct);
+
+    /// <summary>Runs every check in <paramref name="tests"/> (a test file's text).</summary>
+    public static async Task<IReadOnlyList<Outcome>> RunTextAsync(string subsystem, RuleSet ruleSet, string tests, CancellationToken ct)
     {
-        var checks = RuleTestParser.Parse(File.ReadAllText(testFile));
+        var checks = RuleTestParser.Parse(tests);
         var database = subsystem == "database";
         var comparer = database ? (IRuleValueComparer)WincheRuleValueComparer.Instance : new DefaultRuleValueComparer();
         var engine = new RuleEngine(new StaticRuleSetRepository(ruleSet), comparer);
