@@ -46,7 +46,7 @@ Found in the working directory or the nearest parent; rule file paths are relati
 }
 ```
 
-The rules language is Winche.Rules' (Firestore-style):
+The rules language is Winche.Rules' (Firestore-style) — see the **[Rules Language Guide](https://github.com/FlameOfUdun/winche-rules/blob/main/GUIDE.md)**:
 
 ```text
 match users/{userId} {
