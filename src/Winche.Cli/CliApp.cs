@@ -588,35 +588,7 @@ internal static class CliApp
         return $"{matches} match{(matches == 1 ? "" : "es")}, {allows} allow{(allows == 1 ? "" : "s")}";
     }
 
-    private static SortedSet<string> UnknownFunctions(RuleSet ruleSet)
-    {
-        var names = new SortedSet<string>(StringComparer.Ordinal);
-        void Expr(RuleExpression x)
-        {
-            switch (x)
-            {
-                case CallExpression c:
-                    if (!RuleFunctions.Names.Contains(c.Name)) names.Add(c.Name);
-                    foreach (var a in c.Args) Expr(a);
-                    break;
-                case MemberExpression m: Expr(m.Target); break;
-                case IndexExpression ix: Expr(ix.Target); Expr(ix.Index); break;
-                case CompareExpression cmp: Expr(cmp.Left); Expr(cmp.Right); break;
-                case AndExpression a: foreach (var o in a.Operands) Expr(o); break;
-                case OrExpression o: foreach (var p in o.Operands) Expr(p); break;
-                case NotExpression n: Expr(n.Operand); break;
-                case InExpression i: Expr(i.Item); Expr(i.Collection); break;
-                case ConditionalExpression cond: Expr(cond.Condition); Expr(cond.Then); Expr(cond.Else); break;
-            }
-        }
-        void Block(MatchBlock b)
-        {
-            foreach (var a in b.Allow) Expr(a.Condition);
-            foreach (var m in b.Matches) Block(m);
-        }
-        foreach (var m in ruleSet.Matches) Block(m);
-        return names;
-    }
+    private static IReadOnlyList<string> UnknownFunctions(RuleSet ruleSet) => RuleSetValidation.UnknownFunctions(ruleSet);
 }
 
 /// <summary>Positional words plus <c>--name value</c> / <c>--flag</c> options.</summary>

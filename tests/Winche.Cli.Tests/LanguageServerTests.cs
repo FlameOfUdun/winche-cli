@@ -103,6 +103,20 @@ public sealed class LanguageServerTests : IDisposable
     }
 
     [Fact]
+    public async Task Functions_are_known_and_their_mistakes_are_located()
+    {
+        var (_, messages) = await Session(
+            Open("fn.rules", "function owner(uid) {\n  return request.auth.uid == uid;\n}\nmatch users/{uid} {\n  allow get: if owner(uid) && get(/a/$(uid)).ok == true;\n}\n"),
+            Open("arity.rules", "function owner(uid) { return true; }\nmatch users/{uid} {\n  allow get: if owner();\n}\n"));
+
+        Assert.Empty(LastDiagnostics(messages, Uri("fn.rules")));
+        var d = Assert.Single(LastDiagnostics(messages, Uri("arity.rules")));
+        Assert.Contains("'owner' takes 1 argument, not 0", d!["message"]!.GetValue<string>());
+        Assert.Equal(2, d["range"]!["start"]!["line"]!.GetValue<int>());
+        Assert.Equal(16, d["range"]!["start"]!["character"]!.GetValue<int>());   // "  allow get: if " is 16 characters
+    }
+
+    [Fact]
     public async Task Test_files_run_against_their_rules_file_with_lenses()
     {
         File.WriteAllText(Path.Combine(_dir, "database.rules"), "match users/{uid} {\n  allow get: if request.auth.uid == uid;\n}\n");

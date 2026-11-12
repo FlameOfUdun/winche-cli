@@ -116,6 +116,38 @@ public sealed class RuleTestsTests : IDisposable
     }
 
     [Fact]
+    public async Task Functions_and_built_paths_work_in_tests()
+    {
+        var (exit, output, err) = await Test("""
+            function isMember(project) {
+              return exists(/projects/$(project)/members/$(request.auth.uid));
+            }
+
+            match projects/{id} {
+              allow get: if isMember(id) && get(/projects/$(id)).open == true;
+            }
+            """, """
+            documents {
+              projects/p1: { open: true }
+              projects/p1/members/u1: { role: 'editor' }
+              projects/p2: { open: false }
+              projects/p2/members/u1: { role: 'editor' }
+            }
+
+            test "members read open projects" {
+              auth { uid: 'u1' }
+              allow get projects/p1
+              deny get projects/p2
+              auth { uid: 'u2' }
+              deny get projects/p1
+            }
+            """);
+
+        Assert.True(exit == 0, output + err);
+        Assert.Contains("3 checks passed", output);
+    }
+
+    [Fact]
     public async Task Failures_show_the_line_and_exit_1()
     {
         var (exit, output, _) = await Test(Rules, """
