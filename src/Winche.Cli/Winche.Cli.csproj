@@ -29,6 +29,9 @@
     <PackageReference Include="Winche.Webhooks.Database" Version="1.0.0" />
     <PackageReference Include="Winche.Webhooks.Storage" Version="1.0.0" />
     <PackageReference Include="Winche.Webhooks.Auth" Version="1.0.0" />
+    <PackageReference Include="Winche.Functions.Database" Version="1.0.0" />
+    <PackageReference Include="Winche.Functions.Storage" Version="1.0.0" />
+    <PackageReference Include="Winche.Functions.Auth" Version="1.0.0" />
     <PackageReference Include="Winche.Console" Version="4.1.0" />
     <PackageReference Include="Winche.Auth.AspNetCore" Version="1.0.0" />
     <PackageReference Include="Winche.Config" Version="1.0.0" />

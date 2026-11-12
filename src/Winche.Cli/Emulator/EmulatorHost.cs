@@ -42,6 +42,10 @@ internal sealed record EmulatorOptions
     public bool Quiet { get; init; }
     /// <summary>Show the servers' own logs (information and up).</summary>
     public bool Verbose { get; init; }
+    /// <summary>A functions folder to deploy at start and again whenever it's saved.</summary>
+    public string? Functions { get; init; }
+    /// <summary>The deno program for functions.</summary>
+    public string? DenoPath { get; init; }
 }
 
 /// <summary>
@@ -156,6 +160,17 @@ internal sealed class EmulatorHost : IAsyncDisposable
         static IReadOnlyDictionary<string, object?>? Claims(HttpContext http) => WincheClaims.From(http) ?? TestTokens.Claims(http);
 
         builder.Services.AddWincheHooks(o => o.ConnectionString = connection);   // webhooks and ready-made actions
+        // Functions (JS/TS on Deno), with ctx.db / ctx.files / ctx.users; callables at /functions/v1/call/{name}.
+        Winche.Functions.ServiceCollectionExtensions.AddWincheFunctions(builder.Services, o =>
+        {
+            o.ConnectionString = connection;
+            o.DenoPath = options.DenoPath;
+            o.Claims = Claims;
+            o.SyncInterval = TimeSpan.FromSeconds(1);
+        });
+        Winche.Functions.Database.DatabaseFunctionsExtensions.AddWincheFunctionsForDatabase(builder.Services);
+        Winche.Functions.Storage.StorageFunctionsExtensions.AddWincheFunctionsForStorage(builder.Services);
+        Winche.Functions.Auth.AuthFunctionsExtensions.AddWincheFunctionsForAuth(builder.Services);
         Winche.Webhooks.Auth.AuthHooksExtensions.AddWincheHooksForAuth(builder.Services);
         builder.Services.AddWincheDatabase(o =>
         {
@@ -214,6 +229,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         app.MapWincheStorageRestApi();
         app.MapWincheStorageFileSystem();
         app.MapWincheAuth();
+        Winche.Functions.FunctionsEndpoints.MapWincheFunctions(app);
         app.MapWincheConsole("/_console");
 
         try
@@ -233,6 +249,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         var host = new EmulatorHost(app, postgres, tempData, baseUrl, connection, data, output);
         host.Watch(options.DatabaseRules, WincheDatabaseKeys.RuleEngine);
         host.Watch(options.StorageRules, WincheStorageKeys.RULE_ENGINE_KEY);
+        if (options.Functions is { } folder) await host.WatchFunctionsAsync(folder, ct);
         return host;
     }
 
@@ -246,6 +263,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         _out.WriteLine($"  Database (live)   {BaseUrl.Replace("http", "ws")}/documents/ws");
         _out.WriteLine($"  Storage           {BaseUrl}/files");
         _out.WriteLine($"  Auth              {BaseUrl}/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)");
+        _out.WriteLine($"  Functions         {BaseUrl}/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)");
         _out.WriteLine($"  Console           {BaseUrl}/_console   ({ConsoleEmail} / {ConsolePassword})");
         _out.WriteLine($"  Postgres          {(TemporaryDatabase ? "temporary (gone when the emulator stops)" : "the one you passed with --pg")}");
         _out.WriteLine();
@@ -270,6 +288,55 @@ internal sealed class EmulatorHost : IAsyncDisposable
             output.WriteLine($"! {file} not found: {subsystem} allows nothing until it exists.");
             return new RuleSet([]);
         }
+    }
+
+    /// <summary>Deploys the functions folder now and whenever a file in it is saved; a broken save leaves the last good version running.</summary>
+    private async Task WatchFunctionsAsync(string folder, CancellationToken ct)
+    {
+        var functions = _app.Services.GetRequiredService<Winche.Functions.WincheFunctions>();
+        var name = Path.GetFileName(folder);
+        var gate = new SemaphoreSlim(1, 1);
+        string? last = null;
+        async Task DeployAsync(bool first)
+        {
+            await gate.WaitAsync();
+            try
+            {
+                var files = FunctionsFolder.Read(folder);
+                var fingerprint = System.Text.Json.JsonSerializer.Serialize(files);
+                if (fingerprint == last) return;
+                last = fingerprint;
+                var d = await functions.DeployAsync(files, first ? $"{name}/ at start" : $"{name}/ saved", "emulator");
+                _out.WriteLine($"{DateTime.Now:HH:mm:ss} {(first ? "λ" : "↻")} functions v{d.Version}: {(d.Functions.Count == 0 ? "none exported" : string.Join(", ", d.Functions.Select(f => $"{f.Name} ({f.Trigger.Describe()})")))}");
+            }
+            catch (Winche.Functions.FunctionDeployException ex)
+            {
+                _out.WriteLine($"{DateTime.Now:HH:mm:ss} ✗ functions: {ex.Message} (the last good version keeps running)");
+                foreach (var p in ex.Problems) _out.WriteLine("    " + p.Replace("\n", "\n    "));
+            }
+            catch (Exception ex) when (ex is Winche.Functions.FunctionsUnavailableException or CliException)
+            {
+                _out.WriteLine($"{DateTime.Now:HH:mm:ss} ✗ functions: {ex.Message}");
+            }
+            finally { gate.Release(); }
+        }
+        await DeployAsync(first: true);
+        var watcher = new FileSystemWatcher(folder) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size };
+        CancellationTokenSource? pending = null;
+        var debounce = new object();
+        void Changed(object? _, FileSystemEventArgs e)
+        {
+            if (e.FullPath.Contains($"{Path.DirectorySeparatorChar}.")) return;   // .winche/, editors' temp files
+            CancellationTokenSource cts;
+            lock (debounce) { pending?.Cancel(); pending = cts = new CancellationTokenSource(); }
+            _ = Task.Delay(300, cts.Token).ContinueWith(t => { if (!t.IsCanceled) _ = DeployAsync(first: false); }, TaskScheduler.Default);
+        }
+        watcher.Changed += Changed;
+        watcher.Created += Changed;
+        watcher.Deleted += Changed;
+        watcher.Renamed += (s, e) => Changed(s, e);
+        watcher.EnableRaisingEvents = true;
+        _watchers.Add(watcher);
     }
 
     /// <summary>Re-applies a rules file whenever it's saved; a file with an error leaves the previous rules in force.</summary>

@@ -26,7 +26,11 @@ internal static class CliApp
           rules rollback <v>   Make version <v> active again (saved as a new version)
           rules diff           Show how the rules files differ from what the console enforces
           rules pull           Write the console's live rules into the rules files
-          emulators start      Run the database, storage and console locally (Postgres in Docker, rules reloaded on save)
+          functions init [<dir>]
+                               Make a functions folder (default functions/): an example, deno.json, types for VS Code
+          functions deploy [<dir>]
+                               Deploy the functions folder to a server (--url and --key, or WINCHE_SERVER and WINCHE_DEPLOY_KEY)
+          emulators start      Run the database, storage, functions and console locally (Postgres in Docker; rules and functions reloaded on save)
           emulators exec <cmd> Start the emulators, run <cmd> against them (e.g. your tests), stop, exit with its code
           emulators token <uid> [claim=value …]
                                Print a sign-in token the emulators accept
@@ -52,6 +56,8 @@ internal static class CliApp
           --data <dir>         Emulators: keep stored files here (default: a temporary folder)
           --quiet              Emulators: don't print each request
           --verbose            Emulators: show the servers' own logs
+          --url <server>       functions deploy: the Winche server, e.g. https://api.example.com
+          --key <deploy key>   functions deploy: the key from the console (Functions → VS Code)
           -h, --help           Show this help
           --version            Show the version
         """;
@@ -74,7 +80,7 @@ internal static class CliApp
             }
 
             using var http = new HttpClient(env.Http, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(60) };
-            var command = string.Join(' ', a.Positional.Take(a.Positional[0] is "rules" or "emulators" ? 2 : 1));
+            var command = string.Join(' ', a.Positional.Take(a.Positional[0] is "rules" or "emulators" or "functions" ? 2 : 1));
             var run = new Run(env, a, http);
             return command switch
             {
@@ -89,6 +95,8 @@ internal static class CliApp
                 "rules deploy" => await run.DeployAsync(ct),
                 "rules diff" => await run.DiffAsync(ct),
                 "rules pull" => await run.PullAsync(ct),
+                "functions init" => run.FunctionsInit(a.Positional.ElementAtOrDefault(2)),
+                "functions deploy" => await run.FunctionsDeployAsync(a.Positional.ElementAtOrDefault(2), ct),
                 "emulators start" => await run.EmulatorsAsync(null, ct),
                 "emulators exec" => await run.EmulatorsAsync(a.Positional.Count > 2 ? string.Join(' ', a.Positional.Skip(2)) : throw new CliException("Usage: winche emulators exec \"<command>\"", 2), ct),
                 "emulators token" => run.Token(a.Positional.Skip(2).ToList()),
@@ -267,6 +275,37 @@ internal static class CliApp
 
         // ----- emulators -------------------------------------------------------------------------
 
+        // ----- functions -------------------------------------------------------------------------
+
+        private string FunctionsDir(string? given) => given is not null ? Path.GetFullPath(given, env.WorkingDirectory)
+            : Config?.FunctionsPath ?? Path.Combine(Config?.Directory ?? env.WorkingDirectory, "functions");
+
+        public int FunctionsInit(string? dir)
+        {
+            var target = FunctionsDir(dir);
+            var made = FunctionsFolder.Init(target);
+            foreach (var f in made) env.Out.WriteLine($"  wrote {Path.GetRelativePath(env.WorkingDirectory, Path.Combine(target, f))}");
+            if (Config is { FilePath: { } file } config && config.Functions is null)
+            {
+                var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+                json["functions"] = Path.GetRelativePath(config.Directory, target).Replace('\\', '/');
+                File.WriteAllText(file, json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+                env.Out.WriteLine($"  added \"functions\" to {Path.GetFileName(file)}");
+            }
+            env.Out.WriteLine("Functions are ready: edit index.ts (the Deno extension for VS Code gives types), then run: winche emulators start");
+            return 0;
+        }
+
+        public async Task<int> FunctionsDeployAsync(string? dir, CancellationToken ct)
+        {
+            var url = args.Value("url") ?? env.GetVariable("WINCHE_SERVER")
+                ?? throw new CliException("Which server? Pass --url https://api.example.com (or set WINCHE_SERVER).", 2);
+            var key = args.Value("key") ?? env.GetVariable("WINCHE_DEPLOY_KEY")
+                ?? throw new CliException("Pass --key with the deploy key from the console (Functions → VS Code), or set WINCHE_DEPLOY_KEY.", 2);
+            if (!Uri.TryCreate(url.TrimEnd('/') + "/", UriKind.Absolute, out var server)) throw new CliException($"{url} isn't an address.", 2);
+            return await FunctionsFolder.DeployAsync(http, server, key, FunctionsDir(dir), args.Value("message"), env, ct);
+        }
+
         public async Task<int> EmulatorsAsync(string? command, CancellationToken ct)
         {
             var port = 9090;
@@ -282,10 +321,12 @@ internal static class CliApp
                 DataDirectory = args.Value("data") is { } d ? Path.GetFullPath(d, env.WorkingDirectory) : null,
                 DatabaseRules = Rules("database"),
                 StorageRules = Rules("storage"),
+                Functions = FunctionsDir(null) is var fdir && Directory.Exists(fdir) ? fdir : null,
                 Quiet = args.Flag("quiet") || command is not null,
                 Verbose = args.Flag("verbose"),
             };
 
+            if (options.Functions is not null) options = options with { DenoPath = await DenoInstaller.EnsureAsync(env, http, ct) };
             await using var host = await Emulator.EmulatorHost.StartAsync(options, env.Out, ct);
             if (command is null)
             {
@@ -753,7 +794,7 @@ internal static class CliApp
 internal sealed class Args
 {
     private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose"];
-    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data"];
+    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project" };
 
     public List<string> Positional { get; } = [];

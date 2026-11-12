@@ -24,6 +24,8 @@ internal sealed class ProjectConfig
     [JsonPropertyName("projects")] public Dictionary<string, string>? Projects { get; set; }
     [JsonPropertyName("rules")] public Dictionary<string, string> Rules { get; set; } = new(StringComparer.Ordinal);
     [JsonPropertyName("tests")] public Dictionary<string, string>? Tests { get; set; }
+    /// <summary>The functions folder (winche functions init writes "functions").</summary>
+    [JsonPropertyName("functions")] public string? Functions { get; set; }
 
     [JsonIgnore] public string Directory { get; private set; } = "";
     [JsonIgnore] public string? FilePath { get; private set; }
@@ -74,6 +76,8 @@ internal sealed class ProjectConfig
     }
 
     public string RulesPath(string subsystem) => Path.GetFullPath(Rules[subsystem], Directory);
+
+    public string? FunctionsPath => Functions is { } f ? Path.GetFullPath(f, Directory) : null;
 
     public string? TestsPath(string subsystem) =>
         Tests?.GetValueOrDefault(subsystem) is { } file ? Path.GetFullPath(file, Directory) : null;
