@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Testcontainers.PostgreSql;
+using Winche.Auth.AspNetCore;
+using Winche.Auth.DependencyInjection;
 using Winche.Console;
 using Winche.Database.AspNetCore.DependencyInjection;
 using Winche.Database.AspNetCore.Rest.DependencyInjection;
@@ -120,10 +122,22 @@ internal sealed class EmulatorHost : IAsyncDisposable
             builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.None);   // a first start's migration probe "fails" by design
         }
 
+        // Winche Auth: real sign-up and sign-in (/auth/v1), users in the console's Authentication tab. Its tokens are
+        // checked; anything else that looks like a JWT is still taken as-is (`winche emulators token`), as before.
+        builder.Services.AddWincheAuth(o =>
+        {
+            o.ConnectionString = connection;
+            o.Issuer = options.Port == 0 ? "http://winche-emulator" : $"http://{options.Host}:{options.Port}";
+            o.EmailPassword(p => p.MinLength = 6);
+            o.Anonymous();
+        });
+        builder.Services.AddAuthentication().AddWincheTokens(t => t.TrustWincheAuth());
+        static IReadOnlyDictionary<string, object?>? Claims(HttpContext http) => WincheClaims.From(http) ?? TestTokens.Claims(http);
+
         builder.Services.AddWincheDatabase(o =>
         {
             o.ConnectionString = connection;
-            o.MapClaims(TestTokens.Claims);
+            o.MapClaims(Claims);
             o.UseRules(databaseRules);
             o.KeepHistory(TimeSpan.FromDays(7));   // the console's History tab
             o.LogRequests(r => r.SuccessSampleRate = 1.0);   // the Logs Explorer: every request, not a sample
@@ -131,7 +145,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         builder.Services.AddWincheStorage(o =>
         {
             o.ConnectionString = connection;
-            o.MapClaims(TestTokens.Claims);
+            o.MapClaims(Claims);
             o.UseRules(storageRules);
             o.LogRequests(r => r.SuccessSampleRate = 1.0);
         });
@@ -143,6 +157,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.SeedAdminPassword = ConsolePassword;
             o.AddDatabaseTab(b => { b.UseLogs(); b.UseHistory(); });
             o.AddStorageTab(b => b.UseLogs());
+            o.AddAuthenticationTab();
             o.AddLogsTab(l =>
             {
                 l.MinimumLevel = LogLevel.Information;   // locally, see what the servers say…
@@ -164,6 +179,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         await app.InitializeWincheStorageAsync();
         app.MapWincheStorageRestApi();
         archive.Map(app);
+        app.MapWincheAuth();
         app.MapWincheConsole("/_console");
 
         try
@@ -195,6 +211,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         _out.WriteLine($"  Database (REST)   {BaseUrl}/documents");
         _out.WriteLine($"  Database (live)   {BaseUrl.Replace("http", "ws")}/documents/ws");
         _out.WriteLine($"  Storage           {BaseUrl}/files");
+        _out.WriteLine($"  Auth              {BaseUrl}/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)");
         _out.WriteLine($"  Console           {BaseUrl}/_console   ({ConsoleEmail} / {ConsolePassword})");
         _out.WriteLine($"  Postgres          {(TemporaryDatabase ? "temporary (gone when the emulator stops)" : "the one you passed with --pg")}");
         _out.WriteLine();

@@ -91,6 +91,29 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
     }
 
     [Fact]
+    public async Task Users_sign_up_with_Winche_Auth_and_the_rules_see_them()
+    {
+        var rules = File("database.rules", "match users/{uid} {\n  allow read, write: if request.auth.uid == uid;\n}\n");
+        await using var host = await Start(new StringWriter(), databaseRules: rules);
+        using var client = new HttpClient { BaseAddress = new Uri(host.BaseUrl) };
+
+        var signUp = await client.PostAsJsonAsync("/auth/v1/signUp", new { email = "ann@example.com", password = "secret1" });
+        Assert.True(signUp.IsSuccessStatusCode, await signUp.Content.ReadAsStringAsync());
+        var body = await signUp.Content.ReadFromJsonAsync<JsonObject>();
+        var uid = body!["user"]!["uid"]!.GetValue<string>();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", body["accessToken"]!.GetValue<string>());
+        Assert.Equal(HttpStatusCode.OK, (await Put(client, $"users/{uid}", "Ann")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await Put(client, "users/u1", "Ann")).StatusCode);
+
+        // Hand-made test tokens still work beside them.
+        using var u1 = As(host, "u1");
+        Assert.Equal(HttpStatusCode.OK, (await Put(u1, "users/u1", "U1")).StatusCode);
+
+        var guest = await client.PostAsync("/auth/v1/signIn/anonymous", null);
+        Assert.True(guest.IsSuccessStatusCode);
+    }
+
+    [Fact]
     public async Task Files_upload_and_download_through_the_local_store()
     {
         var rules = File("storage.rules", "match uploads/{uid}/{file=**} {\n  allow read, write: if request.auth.uid == uid;\n}\n");
