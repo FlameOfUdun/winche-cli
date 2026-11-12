@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+packages/
+*.nupkg
+*.snupkg
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+.claude/
+*.user
+*.swp
+.DS_Store

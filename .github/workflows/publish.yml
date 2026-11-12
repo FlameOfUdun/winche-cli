@@ -1,0 +1,41 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write   # NuGet trusted publishing (OIDC)
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Winche.Cli.slnx
+
+      - name: Build
+        run: dotnet build Winche.Cli.slnx -c Release --no-restore
+
+      - name: Pack
+        run: dotnet pack src/Winche.Cli/Winche.Cli.csproj -c Release --no-build -o ./packages
+
+      # Exchange the GitHub OIDC token for a short-lived NuGet.org API key.
+      - name: NuGet login (trusted publishing)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: FlameOfUdun
+
+      - name: Push
+        run: dotnet nuget push ./packages/*.nupkg ./packages/*.snupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate

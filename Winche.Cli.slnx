@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Winche.Cli/Winche.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Winche.Cli.Tests/Winche.Cli.Tests.csproj" />
+    <Project Path="tests/Winche.Cli.TestHost/Winche.Cli.TestHost.csproj" />
+  </Folder>
+</Solution>

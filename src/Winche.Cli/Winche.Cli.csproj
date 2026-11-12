@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Winche.Cli</RootNamespace>
+    <AssemblyName>winche</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>winche</ToolCommandName>
+    <PackageId>Winche.Cli</PackageId>
+    <PackageDescription>The winche command-line tool: validate access rules locally and deploy them to a Winche console, like the Firebase CLI. Install with: dotnet tool install -g Winche.Cli</PackageDescription>
+    <PackageTags>winche;cli;rules;security-rules;deploy</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Winche.Cli.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Winche.Rules" Version="4.0.0" />
+  </ItemGroup>
+</Project>
