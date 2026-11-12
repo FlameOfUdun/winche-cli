@@ -42,7 +42,7 @@ Found in the working directory or the nearest parent; rule file paths are relati
 {
   "console": "https://api.example.com/_console",
   "rules": { "database": "database.rules", "storage": "storage.rules" },
-  "tests": { "database": "database.rules.test.json", "storage": "storage.rules.test.json" }
+  "tests": { "database": "database.rules.test", "storage": "storage.rules.test" }
 }
 ```
 
@@ -56,34 +56,53 @@ match users/{userId} {
 
 ## Testing rules
 
-`winche rules test` runs allow/deny cases against the local rules files, offline, so CI can catch a rule
-mistake before it ships (`winche rules deploy` runs them first and stops on a failure). Each case is evaluated
-the way the server builds the request: `auth` becomes `request.auth` (`uid` plus every claim under `token`), a
-database `resource` / `request` gets its fields plus `data`, `id`, `path` and `collection`, and a database
-`list` is proved against its `where` filters (rules are not filters). Values compare exactly as the database
-compares them.
+`winche rules test` runs checks against the local rules files, offline, so CI can catch a rule mistake before
+it ships (`winche rules deploy` runs them first and stops on a failure). Tests are written in the rules
+language's style, in `database.rules.test` / `storage.rules.test`:
 
-```jsonc
-{
-  "documents": { "teams/t1": { "active": true } },        // what get() / exists() see
-  "cases": [
-    { "name": "owner reads their profile", "expect": "allow",
-      "op": "get", "path": "users/u1", "auth": { "uid": "u1" }, "resource": { "name": "Ann" } },
-    { "name": "signed out can't", "expect": "deny", "op": "get", "path": "users/u1" },
-    { "name": "can only set name", "expect": "deny", "op": "create", "path": "users/u1",
-      "auth": { "uid": "u1" }, "request": { "name": "Ann", "admin": true } },
-    { "name": "list own notes", "expect": "allow", "op": "list", "path": "notes",
-      "auth": { "uid": "u1" }, "where": [["ownerId", "==", "u1"]] }
-  ]
+```text
+documents {                                  // what get() / exists() see, in every test
+  teams/t1: { active: true }
+}
+
+test "owners read their profile" {
+  auth { uid: 'u1' }                         // request.auth's claims; omit (or `auth none`) when signed out
+  resource { ownerId: 'u1' }                 // the existing document
+  allow get users/u1
+  deny get users/u2
+}
+
+test "can only set name" {
+  auth { uid: 'u1' }
+  allow create users/u1 with { name: 'Ann' }
+  deny create users/u1 with { name: 'Ann', admin: true }
+}
+
+test "lists are proved against their filters" {
+  auth { uid: 'u1' }
+  allow list notes where ownerId == 'u1'
+  deny list notes
+  allow list group comments where authorId == 'u1'      // a collection group query
+}
+
+test "only until the cutoff" {
+  time timestamp('2027-01-01T00:00:00Z')
+  deny get events/e1
 }
 ```
 
-Case fields: `name`, `expect` (`allow`/`deny`), `op` (`get list create update delete`), `path`, `auth`
-(claims; omit when signed out), `resource` (the existing document or file), `request` (the incoming one),
-`where` (database lists: `[field, op, value]` with `== != < <= > >=`), `collectionGroup`, `documents` (added
-to the file's) and `time` (`request.time`, ISO 8601; default now). Timestamps, bytes, paths and exact integers
-use tagged values: `{"$timestamp": "2026-01-01T00:00:00Z"}`, `{"$bytes": "…"}`, `{"$path": "…"}`,
-`{"$integer": "5"}`. Comments are allowed.
+- **Checks:** `allow` or `deny`, then `get list create update delete` and a path. `create`/`update` take the
+  incoming document with `with { ... }`; database `list` takes `where field op value` (`== != < <= > >=`,
+  joined with `&&`) and `group` for a collection group query.
+- **Setup:** `auth`, `resource`, `time` and `documents` apply to the checks after them in the same test.
+- **Values:** `'strings'`, numbers, `true false null`, `[lists]`, `{maps}` (keys bare or quoted),
+  `timestamp('…')`, `path('…')`, `bytes('base64')`. `//` comments.
+- **Like the server:** `auth` becomes `request.auth` (`uid` plus every claim under `token`); a database
+  document gets its fields plus `data`, `id`, `path` and `collection`; a database `list` is proved against its
+  filters (rules are not filters); values compare exactly as the database compares them.
+
+A failure names the line: `database.rules.test:8: allow delete userData/u1 — got deny`. Syntax errors are
+`file:line:column`.
 
 ## History and rollback
 

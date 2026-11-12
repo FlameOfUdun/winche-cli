@@ -125,7 +125,7 @@ internal static class CliApp
             foreach (var sys in Selected(ProjectConfig.Subsystems))
             {
                 var file = $"{sys}.rules";
-                var tests = $"{sys}.rules.test.json";
+                var tests = $"{sys}.rules.test";
                 config.Rules[sys] = file;
                 (config.Tests ??= new(StringComparer.Ordinal))[sys] = tests;
                 foreach (var (name, content) in new[] { (file, Starter(sys)), (tests, StarterTests(sys)) })
@@ -165,27 +165,32 @@ internal static class CliApp
 
               """;
 
-        private static string StarterTests(string sys) => (sys == "database"
+        private static string StarterTests(string sys) => sys == "database"
             ? """
-              {
-                // Cases for `winche rules test` (also run by `winche rules deploy`). Each is evaluated against
-                // database.rules the way the server builds the request. Fields: name, expect (allow|deny),
-                // op (get|list|create|update|delete), path, auth (claims; omit = signed out), resource (the
-                // existing document), request (the incoming document), where (list), documents (get/exists).
-                "cases": [
-                  { "name": "signed out can't read a user", "expect": "deny", "op": "get", "path": "users/u1" }
-                ]
+              // Checks for database.rules, run by `winche rules test` and before `winche rules deploy`.
+              //
+              // test "owners read their profile" {
+              //   auth { uid: 'u1' }                 // request.auth's claims; omit when signed out
+              //   resource { name: 'Ann' }           // the existing document
+              //   allow get users/u1
+              //   deny get users/u2
+              //   allow create users/u1 with { name: 'Ann' }
+              //   allow list notes where ownerId == 'u1'
+              // }
+
+              test "signed out can't read users" {
+                deny get users/u1
               }
+
               """
             : """
-              {
-                // Cases for `winche rules test` (also run by `winche rules deploy`), evaluated against storage.rules.
-                // Fields: name, expect (allow|deny), op, path, auth (claims; omit = signed out), resource, request.
-                "cases": [
-                  { "name": "signed out can't read a file", "expect": "deny", "op": "get", "path": "userFiles/u1/a.png" }
-                ]
+              // Checks for storage.rules, run by `winche rules test` and before `winche rules deploy`.
+
+              test "signed out can't read files" {
+                deny get userFiles/u1/photo.png
               }
-              """) + "\n";
+
+              """;
 
         // ----- login / logout --------------------------------------------------------------------
 
@@ -320,7 +325,7 @@ internal static class CliApp
             var locals = LoadAll();
             var config = RequireConfig();
             if (!locals.Any(l => config.TestsPath(l.Subsystem) is not null))
-                throw new CliException($"No test files: add \"tests\": {{ \"database\": \"database.rules.test.json\" }} to {ProjectConfig.FileName}.");
+                throw new CliException($"No test files: add \"tests\": {{ \"database\": \"database.rules.test\" }} to {ProjectConfig.FileName}.");
             return await RunTestsAsync(locals, verbose: true, ct) ? 0 : 1;
         }
 
@@ -335,16 +340,30 @@ internal static class CliApp
                 var display = Path.GetRelativePath(env.WorkingDirectory, file);
                 if (!File.Exists(file)) throw new CliException($"{display}: file not found ({local.Subsystem} tests in {ProjectConfig.FileName}).");
 
-                var outcomes = await RuleTests.RunAsync(local.Subsystem, local.RuleSet, file, ct);
-                env.Out.WriteLine($"{display} ({local.Subsystem})");
-                foreach (var o in outcomes)
+                IReadOnlyList<RuleTests.Outcome> outcomes;
+                try
                 {
-                    if (o.Passed) { passed++; if (verbose) env.Out.WriteLine($"  ✓ {o.Name}"); }
-                    else { failed++; env.Out.WriteLine($"  ✗ {o.Name} — {o.Detail}"); }
+                    outcomes = await RuleTests.RunAsync(local.Subsystem, local.RuleSet, file, ct);
                 }
-                if (!verbose && outcomes.All(o => o.Passed)) env.Out.WriteLine($"  ✓ {outcomes.Count} passed");
+                catch (RuleTestSyntaxException ex)
+                {
+                    throw new CliException($"{display}:{ex.Line}:{ex.Column}: {ex.Message}");
+                }
+
+                env.Out.WriteLine($"{display} ({local.Subsystem})");
+                foreach (var group in outcomes.GroupBy(o => o.Check.Test))
+                {
+                    var bad = group.Where(o => !o.Passed).ToList();
+                    passed += group.Count() - bad.Count;
+                    failed += bad.Count;
+                    if (bad.Count == 0) { if (verbose) env.Out.WriteLine($"  ✓ {group.Key}"); continue; }
+                    env.Out.WriteLine($"  ✗ {group.Key}");
+                    foreach (var o in bad)
+                        env.Out.WriteLine($"      {display}:{o.Check.Line}: {o.Check.Describe()} — got {(o.Allowed ? "allow" : "deny")}");
+                }
+                if (!verbose && failed == 0) env.Out.WriteLine($"  ✓ {outcomes.Count} checks passed");
             }
-            env.Out.WriteLine(failed == 0 ? $"{passed} passed" : $"{passed} passed, {failed} failed");
+            env.Out.WriteLine(failed == 0 ? $"{passed} checks passed" : $"{passed} checks passed, {failed} failed");
             return failed == 0;
         }
 

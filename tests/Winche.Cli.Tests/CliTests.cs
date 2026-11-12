@@ -218,16 +218,21 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
     {
         await Run(null, null, null, "init", "--console", ConsoleUrl, "--only", "database");
         Write("database.rules", DatabaseRules);
-        Write("database.rules.test.json", """
-            { "cases": [
-              { "name": "owner reads", "expect": "allow", "op": "get", "path": "users/u1", "auth": { "uid": "u1" } },
-              { "name": "stranger reads", "expect": "allow", "op": "get", "path": "users/u1", "auth": { "uid": "u2" } }
-            ] }
+        Write("database.rules.test", """
+            test "owner reads" {
+              auth { uid: 'u1' }
+              allow get users/u1
+            }
+            test "stranger reads" {
+              auth { uid: 'u2' }
+              allow get users/u1
+            }
             """);
 
         var blocked = await Admin("rules", "deploy");
         Assert.Equal(1, blocked.Exit);
-        Assert.Contains("✗ stranger reads — expected allow, got deny", blocked.Out);
+        Assert.Contains("✗ stranger reads", blocked.Out);
+        Assert.Contains("database.rules.test:7: allow get users/u1 — got deny", blocked.Out);
         Assert.Contains("nothing was deployed", blocked.Err);
         Assert.DoesNotContain("deployed database.rules", blocked.Out);
 

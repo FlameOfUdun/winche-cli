@@ -9,7 +9,7 @@ namespace Winche.Cli;
 /// {
 ///   "console": "https://api.example.com/_console",
 ///   "rules": { "database": "database.rules", "storage": "storage.rules" },
-///   "tests": { "database": "database.rules.test.json" }
+///   "tests": { "database": "database.rules.test" }
 /// }
 /// </code>
 /// Paths are relative to the file's directory. <c>tests</c> (optional) are <c>winche rules test</c>'s case files.
