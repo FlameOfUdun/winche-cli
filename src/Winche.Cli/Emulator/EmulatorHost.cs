@@ -313,11 +313,20 @@ internal sealed class EmulatorHost : IAsyncDisposable
         if (!(path.StartsWith("/documents", StringComparison.Ordinal) || path.StartsWith("/files", StringComparison.Ordinal))) return;
         var status = ctx.Response.StatusCode;
         var who = TestTokens.Claims(ctx)?.GetValueOrDefault("uid") is { } uid ? $" as {uid}" : " signed out";
-        var shown = path.StartsWith("/documents/", StringComparison.Ordinal) && !path.Contains(':') && Decode(path[11..]) is { } doc
-            ? "/documents/" + doc : path;
+        var shown = Readable(path, "/documents/") ?? Readable(path, "/files/") ?? path;
         var note = status == 403 ? "  ← denied by the rules" : "";
         output.WriteLine($"{DateTime.Now:HH:mm:ss} {ctx.Request.Method,-6} {shown}{who} → {status}{note}");
     };
+
+    /// <summary>"/files/cHVibGlj…:upload" → "/files/public/hello.txt:upload": the base64 path the clients send, decoded.</summary>
+    private static string? Readable(string path, string prefix)
+    {
+        if (!path.StartsWith(prefix, StringComparison.Ordinal)) return null;
+        var rest = path[prefix.Length..];
+        var colon = rest.IndexOf(':');
+        var encoded = colon < 0 ? rest : rest[..colon];
+        return Decode(encoded) is { } decoded ? prefix + decoded + (colon < 0 ? "" : rest[colon..]) : null;
+    }
 
     private static string? Decode(string b64)
     {
@@ -326,7 +335,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             var s = b64.Replace('-', '+').Replace('_', '/');
             s = s.PadRight(s.Length + (4 - s.Length % 4) % 4, '=');
             var text = Encoding.UTF8.GetString(Convert.FromBase64String(s));
-            return text.All(c => !char.IsControl(c)) ? text : null;
+            return text.Length > 0 && text.All(c => !char.IsControl(c) && c != '\uFFFD') ? text : null;
         }
         catch (FormatException)
         {
