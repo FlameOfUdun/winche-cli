@@ -186,7 +186,7 @@ Winche emulator is running — rules from database.rules, storage.rules, reloade
 - **Each request** is printed with who made it and the result; `--quiet` turns that off, `--verbose` adds the
   servers' own logs.
 - **The console** has the Logs tab, the Database / Storage Logs sub-tabs (Information and up) and the Database History sub-tab (who changed what); every request is logged to the Logs Explorer.
-- **Auth:** Winche Auth runs too — sign up, sign in and guests at `/auth/v1` (passwords of 6+ characters), users in the console's Authentication tab. Hand-made tokens from `winche emulators token <uid>` keep working beside real ones.
+- **Auth:** Winche Auth runs too — sign up, sign in and guests at `/auth/v1` (passwords of 6+ characters), users in the console's Authentication tab. Hand-made tokens from `winche emulators token <uid>` keep working beside real ones. Emails (verify, reset, email change) aren't sent: their links are printed in the emulator's output.
 - `--port` (default 9090) and `--host` (default `localhost`; `0.0.0.0` to reach it from a phone or another machine).
 
 `winche emulators exec "<command>"` starts the emulators, runs the command with `WINCHE_EMULATOR`,

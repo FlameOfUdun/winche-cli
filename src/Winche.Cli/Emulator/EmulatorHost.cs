@@ -124,14 +124,18 @@ internal sealed class EmulatorHost : IAsyncDisposable
 
         // Winche Auth: real sign-up and sign-in (/auth/v1), users in the console's Authentication tab. Its tokens are
         // checked; anything else that looks like a JWT is still taken as-is (`winche emulators token`), as before.
+        // A random port (0) isn't known until the server starts: links are rewritten to the real address when printed.
+        var issuer = options.Port == 0 ? "http://winche-emulator" : $"http://{options.Host}:{options.Port}";
         builder.Services.AddWincheAuth(o =>
         {
             o.ConnectionString = connection;
-            o.Issuer = options.Port == 0 ? "http://winche-emulator" : $"http://{options.Host}:{options.Port}";
+            o.Issuer = issuer;
             o.KeyEncryptionSecret = "winche-emulator-local-only-signing-key-secret";   // local data, a fixed secret
             o.EmailPassword(p => p.MinLength = 6);
             o.Anonymous();
+            o.Email(e => e.AppName = "your app");   // nothing is sent: links are printed (EmulatorEmailSender)
         });
+        builder.Services.AddSingleton<Winche.Auth.Email.IAuthEmailSender>(new EmulatorEmailSender(output, issuer, () => baseUrl));
         builder.Services.AddAuthentication().AddWincheTokens(t => t.TrustWincheAuth());
         static IReadOnlyDictionary<string, object?>? Claims(HttpContext http) => WincheClaims.From(http) ?? TestTokens.Claims(http);
 
@@ -337,5 +341,20 @@ internal sealed class EmulatorHost : IAsyncDisposable
         {
             try { Directory.Delete(_tempData, recursive: true); } catch (IOException) { }
         }
+    }
+}
+
+/// <summary>The emulator sends no email: it prints each message's link, to open in a browser.</summary>
+internal sealed class EmulatorEmailSender(TextWriter output, string issuer, Func<string> baseUrl) : Winche.Auth.Email.IAuthEmailSender
+{
+    public Task SendAsync(Winche.Auth.Email.AuthEmailMessage message, CancellationToken ct)
+    {
+        lock (output)
+        {
+            output.WriteLine($"{DateTime.Now:HH:mm:ss} ✉ {message.Kind,-14} to {message.To}: \"{message.Subject}\"");
+            if (message.Link is not null)
+                output.WriteLine($"         {(message.Link.StartsWith(issuer, StringComparison.Ordinal) ? baseUrl() + message.Link[issuer.Length..] : message.Link)}");
+        }
+        return Task.CompletedTask;
     }
 }

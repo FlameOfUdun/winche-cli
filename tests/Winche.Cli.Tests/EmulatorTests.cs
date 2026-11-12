@@ -94,7 +94,8 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
     public async Task Users_sign_up_with_Winche_Auth_and_the_rules_see_them()
     {
         var rules = File("database.rules", "match users/{uid} {\n  allow read, write: if request.auth.uid == uid;\n}\n");
-        await using var host = await Start(new StringWriter(), databaseRules: rules);
+        var log = new StringWriter();
+        await using var host = await Start(log, databaseRules: rules);
         using var client = new HttpClient { BaseAddress = new Uri(host.BaseUrl) };
 
         var signUp = await client.PostAsJsonAsync("/auth/v1/signUp", new { email = "ann@example.com", password = "secret1" });
@@ -111,6 +112,12 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
 
         var guest = await client.PostAsync("/auth/v1/signIn/anonymous", null);
         Assert.True(guest.IsSuccessStatusCode);
+
+        // Emails aren't sent: their links are printed, and work.
+        var printed = System.Text.RegularExpressions.Regex.Match(log.ToString(), @"✉ verifyEmail\s+to ann@example.com.*\n\s+(http\S+)");
+        Assert.True(printed.Success, log.ToString());
+        var page = await new HttpClient().GetStringAsync(printed.Groups[1].Value);
+        Assert.Contains("Verify my email", page);
     }
 
     [Fact]
