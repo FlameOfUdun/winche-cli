@@ -181,6 +181,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.AddDatabaseTab(b => { b.UseLogs(); b.UseHistory(); });
             o.AddStorageTab(b => b.UseLogs());
             o.AddAuthenticationTab();
+            o.RequireTwoFactorForSettings = false;   // a local, seeded admin: no authenticator to enrol
             o.AddLogsTab(l =>
             {
                 l.MinimumLevel = LogLevel.Information;   // locally, see what the servers say…
