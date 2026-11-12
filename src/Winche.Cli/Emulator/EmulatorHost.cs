@@ -128,6 +128,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         {
             o.ConnectionString = connection;
             o.Issuer = options.Port == 0 ? "http://winche-emulator" : $"http://{options.Host}:{options.Port}";
+            o.KeyEncryptionSecret = "winche-emulator-local-only-signing-key-secret";   // local data, a fixed secret
             o.EmailPassword(p => p.MinLength = 6);
             o.Anonymous();
         });
