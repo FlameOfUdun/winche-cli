@@ -142,7 +142,9 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.AddStorageTab(b => b.UseLogs());
             o.AddLogsTab(l =>
             {
-                l.MinimumLevel = LogLevel.Information;   // locally, see what the servers say
+                l.MinimumLevel = LogLevel.Information;   // locally, see what the servers say…
+                l.SetLevel("Microsoft", LogLevel.Warning);   // …but not the framework's chatter (every SQL command)
+                l.SetLevel("System", LogLevel.Warning);
                 l.FlushInterval = TimeSpan.FromMilliseconds(500);
             });
         });
