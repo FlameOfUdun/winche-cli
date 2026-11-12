@@ -113,6 +113,14 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         var guest = await client.PostAsync("/auth/v1/signIn/anonymous", null);
         Assert.True(guest.IsSuccessStatusCode);
 
+        // Google / Apple sign-in with fake ID tokens: the same address is the same user.
+        using var anon2 = new HttpClient { BaseAddress = new Uri(host.BaseUrl) };
+        var google = await anon2.PostAsJsonAsync("/auth/v1/signIn/idp", new { provider = "google", idToken = TestTokens.MintIdToken("google", "bob@example.com") });
+        Assert.True(google.IsSuccessStatusCode, await google.Content.ReadAsStringAsync());
+        var bob = (await google.Content.ReadFromJsonAsync<JsonObject>())!["user"]!["uid"]!.GetValue<string>();
+        var again = await anon2.PostAsJsonAsync("/auth/v1/signIn/idp", new { provider = "google", idToken = TestTokens.MintIdToken("google", "bob@example.com") });
+        Assert.Equal(bob, (await again.Content.ReadFromJsonAsync<JsonObject>())!["user"]!["uid"]!.GetValue<string>());
+
         // Emails aren't sent: their links are printed, and work.
         var printed = System.Text.RegularExpressions.Regex.Match(log.ToString(), @"✉ verifyEmail\s+to ann@example.com.*\n\s+(http\S+)");
         Assert.True(printed.Success, log.ToString());

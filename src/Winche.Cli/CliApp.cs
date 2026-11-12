@@ -30,6 +30,8 @@ internal static class CliApp
           emulators exec <cmd> Start the emulators, run <cmd> against them (e.g. your tests), stop, exit with its code
           emulators token <uid> [claim=value …]
                                Print a sign-in token the emulators accept
+          emulators idtoken <google|apple> <email>
+                               Print a fake Google or Apple ID token for the emulators' /auth/v1/signIn/idp
           lsp                  Run the language server for editors (the Winche VS Code extension starts it)
 
         Options:
@@ -90,6 +92,7 @@ internal static class CliApp
                 "emulators start" => await run.EmulatorsAsync(null, ct),
                 "emulators exec" => await run.EmulatorsAsync(a.Positional.Count > 2 ? string.Join(' ', a.Positional.Skip(2)) : throw new CliException("Usage: winche emulators exec \"<command>\"", 2), ct),
                 "emulators token" => run.Token(a.Positional.Skip(2).ToList()),
+                "emulators idtoken" => run.IdToken(a.Positional.Skip(2).ToList()),
                 "lsp" => await new LanguageServer(System.Console.OpenStandardInput(), System.Console.OpenStandardOutput(), env, http).RunAsync(ct),
                 _ => throw new CliException($"Unknown command '{string.Join(' ', a.Positional)}'. Run: winche --help", 2),
             };
@@ -336,6 +339,14 @@ internal static class CliApp
                 };
             }
             env.Out.WriteLine(Emulator.TestTokens.Mint(words[0], claims));
+            return 0;
+        }
+
+        public int IdToken(List<string> words)
+        {
+            if (words.Count != 2 || words[0] is not ("google" or "apple") || !words[1].Contains('@'))
+                throw new CliException("Usage: winche emulators idtoken <google|apple> <email>", 2);
+            env.Out.WriteLine(Emulator.TestTokens.MintIdToken(words[0], words[1]));
             return 0;
         }
 

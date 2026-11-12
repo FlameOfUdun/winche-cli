@@ -11,6 +11,30 @@ namespace Winche.Cli.Emulator;
 /// </summary>
 internal static class TestTokens
 {
+    /// <summary>The audience the emulator's Google and Apple sign-in accept.</summary>
+    public const string IdTokenAudience = "winche-emulator";
+
+    /// <summary>
+    /// An unsigned Google or Apple ID token for <paramref name="email"/> — the same subject for the same address — that the
+    /// emulator's <c>/auth/v1/signIn/idp</c> accepts (and nothing else does).
+    /// </summary>
+    public static string MintIdToken(string provider, string email)
+    {
+        var sub = "emu-" + System.Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(email.ToLowerInvariant())))[..20];
+        var payload = new Dictionary<string, object?>
+        {
+            ["iss"] = provider == "apple" ? "https://appleid.apple.com" : "https://accounts.google.com",
+            ["aud"] = IdTokenAudience,
+            ["sub"] = sub,
+            ["email"] = email,
+            ["email_verified"] = true,
+            ["name"] = email[..email.IndexOf('@')],
+            ["iat"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            ["exp"] = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds(),
+        };
+        return $"{B64("{\"alg\":\"none\",\"typ\":\"JWT\"}")}.{B64(JsonSerializer.Serialize(payload))}.";
+    }
+
     public static string Mint(string uid, IReadOnlyDictionary<string, object?> claims)
     {
         var payload = new Dictionary<string, object?>(claims) { ["uid"] = uid, ["sub"] = uid };
