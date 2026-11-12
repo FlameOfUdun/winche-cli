@@ -166,7 +166,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.LogRequests(r => r.SuccessSampleRate = 1.0);   // the Logs Explorer: every request, not a sample
             o.UseSettings();   // Database → Settings: indexes, expiry, limits
             o.UseHooks(h => Winche.Webhooks.Database.DatabaseHooksExtensions.AddWincheHooks(h));   // the Hooks page
-        }).AddWincheDatabaseWsApi();
+        }).AddWincheDatabaseWsApi(ws => ws.UseSettings());
         builder.Services.AddWincheStorage(o =>
         {
             o.ConnectionString = connection;
