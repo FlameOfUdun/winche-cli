@@ -23,7 +23,7 @@
     <PackageReference Include="Winche.Rules" Version="4.1.0" />
     <PackageReference Include="Winche.Database.AspNetCore.Rest" Version="11.1.0" />
     <PackageReference Include="Winche.Database.AspNetCore.WebSockets" Version="11.1.0" />
-    <PackageReference Include="Winche.Storage.AspNetCore.Rest" Version="9.0.0" />
+    <PackageReference Include="Winche.Storage.AspNetCore.Rest" Version="9.1.0" />
     <PackageReference Include="Winche.Console" Version="4.1.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.12.0" />
     <!-- Testcontainers brings SSH.NET 2025.1.0, which has known vulnerabilities; the fixed release. -->

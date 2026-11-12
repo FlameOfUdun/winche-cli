@@ -126,12 +126,14 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.MapClaims(TestTokens.Claims);
             o.UseRules(databaseRules);
             o.KeepHistory(TimeSpan.FromDays(7));   // the console's History tab
+            o.LogRequests(r => r.SuccessSampleRate = 1.0);   // the Logs Explorer: every request, not a sample
         }).AddWincheDatabaseWsApi();
         builder.Services.AddWincheStorage(o =>
         {
             o.ConnectionString = connection;
             o.MapClaims(TestTokens.Claims);
             o.UseRules(storageRules);
+            o.LogRequests(r => r.SuccessSampleRate = 1.0);
         });
         builder.Services.AddSingleton<IArchive>(archive);
         builder.Services.AddWincheConsole(o =>
