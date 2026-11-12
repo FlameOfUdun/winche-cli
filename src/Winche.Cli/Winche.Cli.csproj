@@ -16,7 +16,7 @@
     <InternalsVisibleTo Include="Winche.Cli.Tests" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Winche.Rules" Version="4.0.0" />
+    <PackageReference Include="Winche.Rules" Version="4.1.0" />
     <!-- Its rule value comparer, so `rules test` compares values exactly as the database does. -->
     <PackageReference Include="Winche.Database" Version="11.0.0" />
   </ItemGroup>
