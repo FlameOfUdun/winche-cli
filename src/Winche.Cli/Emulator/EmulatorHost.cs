@@ -160,6 +160,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.UseRules(databaseRules);
             o.KeepHistory(TimeSpan.FromDays(7));   // the console's History tab
             o.LogRequests(r => r.SuccessSampleRate = 1.0);   // the Logs Explorer: every request, not a sample
+            o.UseSettings();   // Database → Settings: indexes, expiry, limits
         }).AddWincheDatabaseWsApi();
         builder.Services.AddWincheStorage(o =>
         {
@@ -167,6 +168,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.MapClaims(Claims);
             o.UseRules(storageRules);
             o.LogRequests(r => r.SuccessSampleRate = 1.0);
+            o.UseSettings();   // Storage → Settings: size limit, clean-up
             // Files in the data folder, through signed URLs on the emulator itself — the same package apps use.
             o.UseFileSystemArchive(fs =>
             {
