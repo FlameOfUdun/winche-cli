@@ -21,6 +21,7 @@ using Winche.Storage.AspNetCore.DependencyInjection;
 using Winche.Storage.AspNetCore.Rest.DependencyInjection;
 using Winche.Storage.Constants;
 using Winche.Storage.DependencyInjection;
+using Winche.Storage.FileSystem;
 using Winche.Storage.Interfaces;
 
 namespace Winche.Cli.Emulator;
@@ -100,8 +101,8 @@ internal sealed class EmulatorHost : IAsyncDisposable
 
         var tempData = options.DataDirectory is null ? Directory.CreateTempSubdirectory("winche-emulator-").FullName : null;
         var data = options.DataDirectory ?? tempData!;
+        Directory.CreateDirectory(data);
         string baseUrl = "";
-        var archive = new LocalArchive(Path.Combine(data, "storage"), () => baseUrl);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -157,8 +158,13 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.MapClaims(Claims);
             o.UseRules(storageRules);
             o.LogRequests(r => r.SuccessSampleRate = 1.0);
+            // Files in the data folder, through signed URLs on the emulator itself — the same package apps use.
+            o.UseFileSystemArchive(fs =>
+            {
+                fs.Root = Path.Combine(data, "storage");
+                fs.SigningKey = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            });
         });
-        builder.Services.AddSingleton<IArchive>(archive);
         builder.Services.AddWincheConsole(o =>
         {
             o.ConnectionString = connection;
@@ -187,7 +193,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         app.MapWincheDatabaseRestApi();
         await app.InitializeWincheStorageAsync();
         app.MapWincheStorageRestApi();
-        archive.Map(app);
+        app.MapWincheStorageFileSystem();
         app.MapWincheAuth();
         app.MapWincheConsole("/_console");
 

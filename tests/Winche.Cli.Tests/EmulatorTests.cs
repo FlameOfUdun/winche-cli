@@ -143,7 +143,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
 
         var upload = await (await u1.PostAsync(path + ":upload", null)).Content.ReadFromJsonAsync<JsonObject>();
         var uploadUrl = upload!["url"]!.GetValue<string>();
-        Assert.StartsWith(host.BaseUrl + "/_emulator/objects/uploads/u1/notes/a.txt", uploadUrl);
+        Assert.StartsWith(host.BaseUrl + "/_files/o/uploads/u1/notes/a.txt?exp=", uploadUrl);   // signed
         using (var raw = new HttpClient())
             Assert.Equal(HttpStatusCode.OK, (await raw.PutAsync(uploadUrl, new StringContent("hello"))).StatusCode);
 
