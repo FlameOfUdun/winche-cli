@@ -312,8 +312,16 @@ internal sealed class LanguageServer(Stream input, Stream output, CliEnvironment
         ProjectConfig? config;
         try { config = ProjectConfig.Find(Path.GetDirectoryName(UriToPath(uri))!, null); }
         catch (CliException) { return empty; }
-        var consoleUrl = env.GetVariable("WINCHE_CONSOLE") ?? config?.Console;
-        if (consoleUrl is null || !Uri.TryCreate(consoleUrl.TrimEnd('/') + "/", UriKind.Absolute, out var console)) return empty;
+        Uri console;
+        try
+        {
+            if (ConsoleTarget.Resolve(config, null, null, env) is not { } target) return empty;
+            console = target.Url;
+        }
+        catch (CliException)
+        {
+            return empty;
+        }
 
         var key = $"{console}|{subsystem}|{pattern}";
         lock (_fieldCache)

@@ -8,17 +8,20 @@ namespace Winche.Cli;
 /// <code>
 /// {
 ///   "console": "https://api.example.com/_console",
+///   "projects": { "dev": "http://localhost:5000/_console", "prod": "https://api.example.com/_console" },
 ///   "rules": { "database": "database.rules", "storage": "storage.rules" },
 ///   "tests": { "database": "database.rules.test" }
 /// }
 /// </code>
 /// Paths are relative to the file's directory. <c>tests</c> (optional) are <c>winche rules test</c>'s case files.
+/// <c>projects</c> (optional) names consoles; <c>winche use &lt;alias&gt;</c> picks one (<see cref="Target"/>).
 /// </summary>
 internal sealed class ProjectConfig
 {
     public const string FileName = "winche.json";
 
     [JsonPropertyName("console")] public string? Console { get; set; }
+    [JsonPropertyName("projects")] public Dictionary<string, string>? Projects { get; set; }
     [JsonPropertyName("rules")] public Dictionary<string, string> Rules { get; set; } = new(StringComparer.Ordinal);
     [JsonPropertyName("tests")] public Dictionary<string, string>? Tests { get; set; }
 
@@ -78,5 +81,76 @@ internal sealed class ProjectConfig
     public void Save(string path)
     {
         File.WriteAllText(path, JsonSerializer.Serialize(this, Json) + Environment.NewLine);
+    }
+}
+
+/// <summary>Which console a command talks to, and the project alias it came from (if any).</summary>
+internal sealed record ConsoleTarget(Uri Url, string? Alias)
+{
+    public string Describe() => Alias is null ? Url.ToString().TrimEnd('/') : $"{Alias} ({Url.ToString().TrimEnd('/')})";
+
+    /// <summary>
+    /// The console: <c>--console</c>, else <c>--project</c>, else <c>WINCHE_CONSOLE</c>, else the project chosen
+    /// with <c>winche use</c>, else the only project, else <c>"console"</c> in winche.json.
+    /// </summary>
+    public static ConsoleTarget? Resolve(ProjectConfig? config, string? consoleArg, string? projectArg, CliEnvironment env)
+    {
+        if (consoleArg is not null) return new(Parse(consoleArg), null);
+        var projects = config?.Projects ?? [];
+        if (projectArg is not null)
+            return projects.TryGetValue(projectArg, out var url)
+                ? new(Parse(url), projectArg)
+                : throw new CliException(projects.Count == 0
+                    ? $"--project {projectArg}: {ProjectConfig.FileName} has no \"projects\". Add one: winche use --add {projectArg} <console url>"
+                    : $"--project {projectArg}: no such project (have {string.Join(", ", projects.Keys)}).");
+        if (env.GetVariable("WINCHE_CONSOLE") is { Length: > 0 } fromEnv) return new(Parse(fromEnv), null);
+        if (config?.FilePath is { } file && ActiveProjects.Get(env, file) is { } active)
+            return projects.TryGetValue(active, out var url)
+                ? new(Parse(url), active)
+                : throw new CliException($"The active project '{active}' isn't in {ProjectConfig.FileName} any more. Pick one: winche use <alias>");
+        if (projects.Count == 1) return new(Parse(projects.Values.First()), projects.Keys.First());
+        if (config?.Console is { } single) return new(Parse(single), null);
+        if (projects.Count > 1)
+            throw new CliException($"Which project? Run winche use <alias> ({string.Join(", ", projects.Keys)}), or pass --project.");
+        return null;
+    }
+
+    public static Uri Parse(string raw) =>
+        Uri.TryCreate(raw.TrimEnd('/') + "/", UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
+            ? uri
+            : throw new CliException($"'{raw}' isn't a console URL (expected https://host/prefix).");
+}
+
+/// <summary>
+/// The project chosen with <c>winche use</c> for each checkout (by its winche.json path), kept on this machine in
+/// <c>active-projects.json</c> next to the credentials — like the Firebase CLI's active project.
+/// </summary>
+internal static class ActiveProjects
+{
+    private static string File(CliEnvironment env) => Path.Combine(env.ConfigDirectory, "active-projects.json");
+
+    private static Dictionary<string, string> Load(CliEnvironment env)
+    {
+        try
+        {
+            return System.IO.File.Exists(File(env))
+                ? JsonSerializer.Deserialize<Dictionary<string, string>>(System.IO.File.ReadAllText(File(env))) ?? []
+                : [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public static string? Get(CliEnvironment env, string configFile) => Load(env).GetValueOrDefault(configFile);
+
+    public static void Set(CliEnvironment env, string configFile, string? alias)
+    {
+        var all = Load(env);
+        if (alias is null) all.Remove(configFile);
+        else all[configFile] = alias;
+        Directory.CreateDirectory(env.ConfigDirectory);
+        System.IO.File.WriteAllText(File(env), JsonSerializer.Serialize(all, ProjectConfig.Json));
     }
 }

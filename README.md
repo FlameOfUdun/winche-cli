@@ -16,6 +16,8 @@ dotnet tool install -g Winche.Cli
 
 ```sh
 winche init --console https://api.example.com/_console   # winche.json, rules files and their test files
+winche use --add prod https://api.example.com/_console   # name a console (and use it here)
+winche use dev                                           # switch projects; `winche use` lists them
 winche login                                             # browser sign-in (Keycloak)
 winche rules validate                                    # offline: syntax, paths, unknown functions
 winche rules test                                        # offline: run the allow/deny cases
@@ -29,7 +31,7 @@ winche rules pull                                        # write the live rules 
 winche logout
 ```
 
-Options: `--console <url>`, `--token <jwt>`, `--config <path>`, `--only database|storage`,
+Options: `-P/--project <alias>`, `--console <url>`, `--token <jwt>`, `--config <path>`, `--only database|storage`,
 `-m/--message <note>` (deploy), `--force` (deploy unchanged files too), `--skip-tests` (deploy), `-y/--yes`
 (rollback without a prompt), `--stdout` (pull), `--port <n>` (login).
 Run `winche --help` for the full list.
@@ -53,6 +55,23 @@ match users/{userId} {
   allow read, write: if request.auth.uid == userId;
 }
 ```
+
+## Projects
+
+Name your consoles in `winche.json` and pick one per checkout, like `firebase use`:
+
+```json
+{
+  "projects": { "dev": "http://localhost:5000/_console", "prod": "https://api.example.com/_console" },
+  "rules": { "database": "database.rules" }
+}
+```
+
+`winche use <alias>` picks the project for this checkout (kept on your machine, not in the repo, so each person
+and CI job picks its own); `winche use` lists them (`*` is the picked one); `winche use --add <alias> <url>`,
+`--remove <alias>` and `--clear` edit them. Every command that talks to a console prints `Project: prod (…)` first.
+Which console a command uses: `--console`, else `-P/--project`, else `WINCHE_CONSOLE`, else the picked project,
+else the only project, else `"console"`. Sign-ins are kept per console, so switching doesn't sign you out.
 
 ## Testing rules
 

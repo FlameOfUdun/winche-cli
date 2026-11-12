@@ -15,6 +15,8 @@ internal static class CliApp
 
         Commands:
           init                 Create winche.json and starter database.rules / storage.rules
+          use [<alias>]        Pick the project (console) to use here, or list them
+                               (--add <alias> <url>, --remove <alias>, --clear)
           login                Sign in to the console in your browser (Keycloak)
           logout               Forget the saved sign-in for the console
           rules validate       Check the rules files (offline)
@@ -28,6 +30,7 @@ internal static class CliApp
 
         Options:
           --console <url>      Console URL, e.g. https://api.example.com/_console (or WINCHE_CONSOLE, or winche.json)
+          -P, --project <name> A project from winche.json's "projects" (instead of the one picked with winche use)
           --token <jwt>        Bearer token to use instead of a saved sign-in (or WINCHE_TOKEN; for CI)
           --config <path>      winche.json to use (default: the nearest one upward)
           --only <list>        database, storage, or database,storage (default: every file in winche.json)
@@ -65,6 +68,7 @@ internal static class CliApp
             return command switch
             {
                 "init" => run.Init(),
+                "use" => run.Use(a.Positional.ElementAtOrDefault(1), a.Positional.ElementAtOrDefault(2)),
                 "login" => await run.LoginAsync(ct),
                 "logout" => run.Logout(),
                 "rules validate" => run.Validate(),
@@ -107,13 +111,65 @@ internal static class CliApp
         private ProjectConfig RequireConfig() =>
             Config ?? throw new CliException($"No {ProjectConfig.FileName} here or in a parent directory. Run: winche init");
 
-        private Uri ConsoleUrl()
+        private ConsoleTarget Target() =>
+            ConsoleTarget.Resolve(Config, args.Value("console"), args.Value("project"), env)
+            ?? throw new CliException($"Which console? Pass --console <url>, set WINCHE_CONSOLE, or add \"projects\" (winche use --add <alias> <url>) or \"console\" to {ProjectConfig.FileName}.");
+
+        private Uri ConsoleUrl() => Target().Url;
+
+        // ----- use --------------------------------------------------------------------------------
+
+        public int Use(string? alias, string? url)
         {
-            var raw = args.Value("console") ?? env.GetVariable("WINCHE_CONSOLE") ?? Config?.Console
-                      ?? throw new CliException($"Which console? Pass --console <url>, set WINCHE_CONSOLE, or add \"console\" to {ProjectConfig.FileName}.");
-            if (!Uri.TryCreate(raw.TrimEnd('/') + "/", UriKind.Absolute, out var uri) || (uri.Scheme != "https" && uri.Scheme != "http"))
-                throw new CliException($"'{raw}' isn't a console URL (expected https://host/prefix).");
-            return uri;
+            var config = RequireConfig();
+            var path = config.FilePath!;
+            if (args.Value("add") is { } add)
+            {
+                var target = url ?? alias ?? throw new CliException("Usage: winche use --add <alias> <console url>", 2);
+                ConsoleTarget.Parse(target);
+                (config.Projects ??= new(StringComparer.Ordinal))[add] = target.TrimEnd('/');
+                config.Save(path);
+                ActiveProjects.Set(env, path, add);
+                env.Out.WriteLine($"Added {add} ({target.TrimEnd('/')}) and using it here.");
+                return 0;
+            }
+            if (args.Value("remove") is { } remove)
+            {
+                if (config.Projects is null || !config.Projects.Remove(remove)) throw new CliException($"No project named '{remove}'.");
+                if (config.Projects.Count == 0) config.Projects = null;
+                config.Save(path);
+                if (ActiveProjects.Get(env, path) == remove) ActiveProjects.Set(env, path, null);
+                env.Out.WriteLine($"Removed {remove}.");
+                return 0;
+            }
+            if (args.Flag("clear"))
+            {
+                ActiveProjects.Set(env, path, null);
+                env.Out.WriteLine("No project picked here now.");
+                return 0;
+            }
+
+            var projects = config.Projects ?? [];
+            if (alias is null)
+            {
+                if (projects.Count == 0)
+                {
+                    env.Out.WriteLine($"No projects in {ProjectConfig.FileName}. Add one: winche use --add <alias> <console url>");
+                    return 0;
+                }
+                var active = ActiveProjects.Get(env, path);
+                foreach (var (name, target) in projects.OrderBy(p => p.Key, StringComparer.Ordinal))
+                    env.Out.WriteLine($"{(name == active ? "*" : " ")} {name,-12} {target}");
+                if (active is null) env.Out.WriteLine(projects.Count == 1 ? "(the only project is used)" : "(none picked: winche use <alias>)");
+                return 0;
+            }
+            if (!projects.ContainsKey(alias))
+                throw new CliException(projects.Count == 0
+                    ? $"No projects in {ProjectConfig.FileName}. Add one: winche use --add {alias} <console url>"
+                    : $"No project named '{alias}' (have {string.Join(", ", projects.Keys)}). Add it: winche use --add {alias} <console url>");
+            ActiveProjects.Set(env, path, alias);
+            env.Out.WriteLine($"Now using {alias} ({projects[alias]}) here.");
+            return 0;
         }
 
         // ----- init ------------------------------------------------------------------------------
@@ -225,7 +281,9 @@ internal static class CliApp
 
         private async Task<ConsoleClient> ClientAsync(CancellationToken ct)
         {
-            var console = ConsoleUrl();
+            var target = Target();
+            var console = target.Url;
+            if (target.Alias is not null) env.Out.WriteLine($"Project: {target.Describe()}");
             var token = args.Value("token") ?? env.GetVariable("WINCHE_TOKEN");
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -594,9 +652,9 @@ internal static class CliApp
 /// <summary>Positional words plus <c>--name value</c> / <c>--flag</c> options.</summary>
 internal sealed class Args
 {
-    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes"];
-    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port"];
-    private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes" };
+    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear"];
+    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove"];
+    private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project" };
 
     public List<string> Positional { get; } = [];
     private readonly Dictionary<string, string?> _options = new(StringComparer.Ordinal);
