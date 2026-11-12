@@ -23,6 +23,7 @@ using Winche.Storage.AspNetCore.Rest.DependencyInjection;
 using Winche.Storage.Constants;
 using Winche.Storage.DependencyInjection;
 using Winche.Storage.FileSystem;
+using Winche.Storage.S3.DependencyInjection;
 using Winche.Storage.Interfaces;
 
 namespace Winche.Cli.Emulator;
@@ -168,7 +169,8 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.MapClaims(Claims);
             o.UseRules(storageRules);
             o.LogRequests(r => r.SuccessSampleRate = 1.0);
-            o.UseSettings();   // Storage → Settings: size limit, clean-up
+            o.UseSettings();   // Storage → Settings: size limit, clean-up, moving files
+            o.AllowS3Locations();   // … to an S3 or S3-compatible bucket
             // Files in the data folder, through signed URLs on the emulator itself — the same package apps use.
             o.UseFileSystemArchive(fs =>
             {
