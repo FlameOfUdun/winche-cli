@@ -138,8 +138,13 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.ConnectionString = connection;
             o.SeedAdminEmail = ConsoleEmail;
             o.SeedAdminPassword = ConsolePassword;
-            o.AddDatabaseTab();
-            o.AddStorageTab();
+            o.AddDatabaseTab(b => b.UseLogs());
+            o.AddStorageTab(b => b.UseLogs());
+            o.AddLogsTab(l =>
+            {
+                l.MinimumLevel = LogLevel.Information;   // locally, see what the servers say
+                l.FlushInterval = TimeSpan.FromMilliseconds(500);
+            });
         });
         builder.Services.AddCors(c => c.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
