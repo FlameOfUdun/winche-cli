@@ -15,18 +15,23 @@ dotnet tool install -g Winche.Cli
 ## Commands
 
 ```sh
-winche init --console https://api.example.com/_console   # winche.json + database.rules + storage.rules
+winche init --console https://api.example.com/_console   # winche.json, rules files and their test files
 winche login                                             # browser sign-in (Keycloak)
 winche rules validate                                    # offline: syntax, paths, unknown functions
+winche rules test                                        # offline: run the allow/deny cases
 winche rules diff                                        # local files vs. what the console enforces
-winche rules deploy                                      # publish changed files as new versions
+winche rules deploy                                      # run the tests, then publish changed files as new versions
 winche rules deploy --dry-run                            # show the changes without saving
+winche rules history                                     # the console's versions (who, when, note)
+winche rules history 3 --only database                   # version 3 against the active one
+winche rules rollback 3 --only database                  # make version 3 active again
 winche rules pull                                        # write the live rules into the files
 winche logout
 ```
 
 Options: `--console <url>`, `--token <jwt>`, `--config <path>`, `--only database|storage`,
-`-m/--message <note>` (deploy), `--force` (deploy unchanged files too), `--stdout` (pull), `--port <n>` (login).
+`-m/--message <note>` (deploy), `--force` (deploy unchanged files too), `--skip-tests` (deploy), `-y/--yes`
+(rollback without a prompt), `--stdout` (pull), `--port <n>` (login).
 Run `winche --help` for the full list.
 
 ## `winche.json`
@@ -36,7 +41,8 @@ Found in the working directory or the nearest parent; rule file paths are relati
 ```json
 {
   "console": "https://api.example.com/_console",
-  "rules": { "database": "database.rules", "storage": "storage.rules" }
+  "rules": { "database": "database.rules", "storage": "storage.rules" },
+  "tests": { "database": "database.rules.test.json", "storage": "storage.rules.test.json" }
 }
 ```
 
@@ -48,10 +54,49 @@ match users/{userId} {
 }
 ```
 
+## Testing rules
+
+`winche rules test` runs allow/deny cases against the local rules files, offline, so CI can catch a rule
+mistake before it ships (`winche rules deploy` runs them first and stops on a failure). Each case is evaluated
+the way the server builds the request: `auth` becomes `request.auth` (`uid` plus every claim under `token`), a
+database `resource` / `request` gets its fields plus `data`, `id`, `path` and `collection`, and a database
+`list` is proved against its `where` filters (rules are not filters). Values compare exactly as the database
+compares them.
+
+```jsonc
+{
+  "documents": { "teams/t1": { "active": true } },        // what get() / exists() see
+  "cases": [
+    { "name": "owner reads their profile", "expect": "allow",
+      "op": "get", "path": "users/u1", "auth": { "uid": "u1" }, "resource": { "name": "Ann" } },
+    { "name": "signed out can't", "expect": "deny", "op": "get", "path": "users/u1" },
+    { "name": "can only set name", "expect": "deny", "op": "create", "path": "users/u1",
+      "auth": { "uid": "u1" }, "request": { "name": "Ann", "admin": true } },
+    { "name": "list own notes", "expect": "allow", "op": "list", "path": "notes",
+      "auth": { "uid": "u1" }, "where": [["ownerId", "==", "u1"]] }
+  ]
+}
+```
+
+Case fields: `name`, `expect` (`allow`/`deny`), `op` (`get list create update delete`), `path`, `auth`
+(claims; omit when signed out), `resource` (the existing document or file), `request` (the incoming one),
+`where` (database lists: `[field, op, value]` with `== != < <= > >=`), `collectionGroup`, `documents` (added
+to the file's) and `time` (`request.time`, ISO 8601; default now). Timestamps, bytes, paths and exact integers
+use tagged values: `{"$timestamp": "2026-01-01T00:00:00Z"}`, `{"$bytes": "…"}`, `{"$path": "…"}`,
+`{"$integer": "5"}`. Comments are allowed.
+
+## History and rollback
+
+`winche rules history` lists each subsystem's versions with who saved them, when and the note (`*` marks the
+active one); `winche rules history <v>` shows version `<v>` as a diff against the active one. `winche rules
+rollback <v>` shows that diff, asks, and makes `<v>` active again as a new version, exactly like the console's
+Revert, so the history stays complete (`--yes` skips the prompt for scripts). With both subsystems configured,
+pick one with `--only`.
+
 ## How deploy works
 
 - **All or nothing on validity.** Every file is checked first and errors are reported as `file:line:column`;
-  nothing is published if any file has one.
+  nothing is published if any file has one, or if a test fails (`--skip-tests` to deploy anyway).
 - **Unchanged files are skipped** (`database: up to date (v3)`); `--force` saves them anyway.
 - **No lost edits.** A deploy names the version it replaces, so if someone saved in the console meanwhile the
   deploy stops and asks you to run it again.

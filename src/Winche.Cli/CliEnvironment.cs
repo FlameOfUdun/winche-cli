@@ -5,6 +5,10 @@ internal sealed class CliEnvironment
 {
     public required TextWriter Out { get; init; }
     public required TextWriter Error { get; init; }
+    public TextReader In { get; init; } = TextReader.Null;
+
+    /// <summary>Whether a person can answer a prompt (stdin is a terminal).</summary>
+    public bool Interactive { get; init; }
     public required string WorkingDirectory { get; init; }
 
     /// <summary>Directory holding <c>credentials.json</c> (default <c>~/.config/winche</c>).</summary>
@@ -28,6 +32,8 @@ internal sealed class CliEnvironment
         {
             Out = Console.Out,
             Error = Console.Error,
+            In = Console.In,
+            Interactive = !Console.IsInputRedirected,
             WorkingDirectory = Directory.GetCurrentDirectory(),
             ConfigDirectory = Path.Combine(string.IsNullOrEmpty(xdg) ? Path.Combine(home, ".config") : xdg, "winche"),
             GetVariable = Environment.GetEnvironmentVariable,

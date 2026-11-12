@@ -8,10 +8,11 @@ namespace Winche.Cli;
 /// <code>
 /// {
 ///   "console": "https://api.example.com/_console",
-///   "rules": { "database": "database.rules", "storage": "storage.rules" }
+///   "rules": { "database": "database.rules", "storage": "storage.rules" },
+///   "tests": { "database": "database.rules.test.json" }
 /// }
 /// </code>
-/// Rule file paths are relative to the file's directory.
+/// Paths are relative to the file's directory. <c>tests</c> (optional) are <c>winche rules test</c>'s case files.
 /// </summary>
 internal sealed class ProjectConfig
 {
@@ -19,6 +20,7 @@ internal sealed class ProjectConfig
 
     [JsonPropertyName("console")] public string? Console { get; set; }
     [JsonPropertyName("rules")] public Dictionary<string, string> Rules { get; set; } = new(StringComparer.Ordinal);
+    [JsonPropertyName("tests")] public Dictionary<string, string>? Tests { get; set; }
 
     [JsonIgnore] public string Directory { get; private set; } = "";
     [JsonIgnore] public string? FilePath { get; private set; }
@@ -60,15 +62,18 @@ internal sealed class ProjectConfig
             throw new CliException($"{path}: invalid JSON ({ex.Message}).");
         }
         config.Rules ??= new(StringComparer.Ordinal);
-        foreach (var key in config.Rules.Keys)
+        foreach (var key in config.Rules.Keys.Concat(config.Tests?.Keys ?? Enumerable.Empty<string>()))
             if (!Subsystems.Contains(key))
-                throw new CliException($"{path}: unknown rules key '{key}' (expected database or storage).");
+                throw new CliException($"{path}: unknown key '{key}' under rules/tests (expected database or storage).");
         config.FilePath = path;
         config.Directory = Path.GetDirectoryName(path)!;
         return config;
     }
 
     public string RulesPath(string subsystem) => Path.GetFullPath(Rules[subsystem], Directory);
+
+    public string? TestsPath(string subsystem) =>
+        Tests?.GetValueOrDefault(subsystem) is { } file ? Path.GetFullPath(file, Directory) : null;
 
     public void Save(string path)
     {

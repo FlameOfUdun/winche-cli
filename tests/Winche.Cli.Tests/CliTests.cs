@@ -33,6 +33,8 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
 
     private sealed record Result(int Exit, string Out, string Err);
 
+    private string? _stdin;
+
     private async Task<Result> Run(string? token, HttpMessageHandler? http, Action<string>? openBrowser, params string[] args)
     {
         var stdout = new StringWriter();
@@ -46,6 +48,8 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
             GetVariable = name => name == "WINCHE_TOKEN" ? token : null,
             Http = http ?? App.Server.CreateHandler(),
             OpenBrowser = openBrowser ?? (_ => throw new InvalidOperationException("no browser in tests")),
+            In = new StringReader(_stdin ?? ""),
+            Interactive = _stdin is not null,
         };
         var exit = await CliApp.RunAsync(args, env);
         return new(exit, stdout.ToString(), stderr.ToString());
@@ -207,6 +211,76 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
         var logout = await Run(null, keycloak, null, "logout");
         Assert.Contains("Signed out", logout.Out);
         Assert.Contains("winche login", (await Run(null, keycloak, null, "rules", "deploy")).Err);
+    }
+
+    [Fact]
+    public async Task Deploy_runs_the_tests_first_and_stops_on_a_failure()
+    {
+        await Run(null, null, null, "init", "--console", ConsoleUrl, "--only", "database");
+        Write("database.rules", DatabaseRules);
+        Write("database.rules.test.json", """
+            { "cases": [
+              { "name": "owner reads", "expect": "allow", "op": "get", "path": "users/u1", "auth": { "uid": "u1" } },
+              { "name": "stranger reads", "expect": "allow", "op": "get", "path": "users/u1", "auth": { "uid": "u2" } }
+            ] }
+            """);
+
+        var blocked = await Admin("rules", "deploy");
+        Assert.Equal(1, blocked.Exit);
+        Assert.Contains("✗ stranger reads — expected allow, got deny", blocked.Out);
+        Assert.Contains("nothing was deployed", blocked.Err);
+        Assert.DoesNotContain("deployed database.rules", blocked.Out);
+
+        var skipped = await Admin("rules", "deploy", "--skip-tests");
+        Assert.Contains("deployed database.rules as v1", skipped.Out);
+    }
+
+    [Fact]
+    public async Task History_lists_versions_shows_one_and_rollback_reverts()
+    {
+        await Run(null, null, null, "init", "--console", ConsoleUrl, "--only", "database");
+        Write("database.rules", DatabaseRules);
+        await Admin("rules", "deploy", "-m", "first");
+        Write("database.rules", DatabaseRules.Replace("read, write", "read"));
+        await Admin("rules", "deploy", "-m", "read only");
+
+        var history = await Admin("rules", "history");
+        Assert.Equal(0, history.Exit);
+        Assert.Matches(@"\* v2 .*read only", history.Out);
+        Assert.Matches(@"  v1 .*first", history.Out);
+
+        var show = await Admin("rules", "history", "1");
+        Assert.Contains("database v1 against the active v2:", show.Out);
+        Assert.Contains("+   allow read, write:", show.Out);
+
+        // No prompt possible (not interactive) and no --yes: refuse.
+        var refused = await Admin("rules", "rollback", "1");
+        Assert.Equal(2, refused.Exit);
+        Assert.Contains("--yes", refused.Err);
+
+        // Interactive "n" keeps v2.
+        _stdin = "n\n";
+        Assert.Contains("Not rolled back.", (await Admin("rules", "rollback", "1")).Out);
+        _stdin = null;
+
+        var rolled = await Admin("rules", "rollback", "v1", "--yes");
+        Assert.Equal(0, rolled.Exit);
+        Assert.Contains("database: v1 is active again as v3", rolled.Out);
+        Assert.Matches(@"\* v3 .*Reverted to v1", (await Admin("rules", "history")).Out);
+        Write("database.rules", DatabaseRules);   // v3 has v1's rules
+        Assert.Contains("database: up to date (v3)", (await Admin("rules", "deploy", "--skip-tests")).Out);
+
+        Assert.Contains("has no version 9", (await Admin("rules", "rollback", "9", "--yes")).Err);
+        Assert.Contains("v3 is already active", (await Admin("rules", "rollback", "3", "--yes")).Out);
+    }
+
+    [Fact]
+    public async Task Rollback_with_both_subsystems_asks_which()
+    {
+        await Run(null, null, null, "init", "--console", ConsoleUrl);
+        var r = await Admin("rules", "rollback", "1", "--yes");
+        Assert.Equal(2, r.Exit);
+        Assert.Contains("--only database", r.Err);
     }
 
     private static int FreePort()

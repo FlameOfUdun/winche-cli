@@ -14,7 +14,8 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         [property: JsonPropertyName("isActive")] bool IsActive,
         [property: JsonPropertyName("note")] string? Note,
         [property: JsonPropertyName("createdAtUtc")] DateTimeOffset CreatedAtUtc,
-        [property: JsonPropertyName("createdBy")] string? CreatedBy);
+        [property: JsonPropertyName("createdBy")] string? CreatedBy,
+        [property: JsonPropertyName("revertedFromVersion")] int? RevertedFromVersion = null);
 
     internal sealed record VersionDetail(
         [property: JsonPropertyName("version")] int Version,
@@ -44,11 +45,18 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
     public async Task<string> GetLiveAsync(string subsystem, CancellationToken ct) =>
         (await SendAsync<RulesJsonBody>(HttpMethod.Get, $"api/rules/{subsystem}/live", null, subsystem, ct))!.RulesJson;
 
+    public async Task<VersionDetail> GetVersionAsync(string subsystem, int version, CancellationToken ct) =>
+        (await SendAsync<VersionDetail>(HttpMethod.Get, $"api/rules/{subsystem}/versions/{version}", null, subsystem, ct, $"{subsystem} has no version {version}."))!;
+
+    /// <summary>Makes <paramref name="version"/> active again, as a new version (like the console's Revert).</summary>
+    public async Task<VersionDetail> RevertAsync(string subsystem, int version, CancellationToken ct) =>
+        (await SendAsync<VersionDetail>(HttpMethod.Post, $"api/rules/{subsystem}/revert/{version}", null, subsystem, ct, $"{subsystem} has no version {version}."))!;
+
     public async Task<VersionDetail> SaveAsync(string subsystem, string rulesJson, string note, int? expectedHead, CancellationToken ct) =>
         (await SendAsync<VersionDetail>(HttpMethod.Post, $"api/rules/{subsystem}",
             new { rulesJson, note, expectedHeadVersion = expectedHead }, subsystem, ct))!;
 
-    private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, string subsystem, CancellationToken ct)
+    private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, string subsystem, CancellationToken ct, string? notFound = null)
     {
         using var request = new HttpRequestMessage(method, new Uri(console, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -74,6 +82,8 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
                     throw new CliException($"Not signed in to {console} (or the session ended). Run: winche login");
                 case HttpStatusCode.Forbidden:
                     throw new CliException("Your account can't manage rules: it needs the console's Admin role.");
+                case HttpStatusCode.NotFound when notFound is not null && await HasSubsystemAsync(subsystem, ct):
+                    throw new CliException(notFound);
                 case HttpStatusCode.NotFound:
                     throw new CliException(
                         $"The console has no {subsystem} rules editor. Enable it in the host: Add{Title(subsystem)}Tab(b => b.UseRulesEditor()).");
@@ -93,6 +103,14 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
                 throw new CliException($"{console} doesn't look like a Winche console (got {response.Content.Headers.ContentType?.MediaType ?? "no content type"}). Check the URL ends with the console's prefix, e.g. /_console.");
             return TryRead<T>(text) ?? throw new CliException("The console sent an unreadable response.");
         }
+    }
+
+    private async Task<bool> HasSubsystemAsync(string subsystem, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(console, $"api/rules/{subsystem}/versions"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await http.SendAsync(request, ct);
+        return response.IsSuccessStatusCode;
     }
 
     private static T? TryRead<T>(string text)

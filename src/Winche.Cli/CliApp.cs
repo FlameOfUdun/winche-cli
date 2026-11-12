@@ -18,7 +18,10 @@ internal static class CliApp
           login                Sign in to the console in your browser (Keycloak)
           logout               Forget the saved sign-in for the console
           rules validate       Check the rules files (offline)
-          rules deploy         Publish the rules files as new versions on the console
+          rules test           Run the allow/deny cases in the test files (offline)
+          rules deploy         Run the tests, then publish the rules files as new versions on the console
+          rules history [<v>]  List the console's rule versions, or show version <v> against the active one
+          rules rollback <v>   Make version <v> active again (saved as a new version)
           rules diff           Show how the rules files differ from what the console enforces
           rules pull           Write the console's live rules into the rules files
 
@@ -30,6 +33,8 @@ internal static class CliApp
           -m, --message <text> Note for the deployed versions (deploy)
           --dry-run            Show what deploy would change, without saving
           --force              Deploy even when the console already has these rules
+          --skip-tests         Deploy without running the tests first
+          -y, --yes            Don't ask before a rollback
           --stdout             Print pulled rules instead of writing the files (pull)
           --port <n>           Loopback port for the sign-in callback (login; default 9005)
           -h, --help           Show this help
@@ -62,6 +67,9 @@ internal static class CliApp
                 "login" => await run.LoginAsync(ct),
                 "logout" => run.Logout(),
                 "rules validate" => run.Validate(),
+                "rules test" => await run.TestAsync(ct),
+                "rules history" => await run.HistoryAsync(a.Positional.ElementAtOrDefault(2), ct),
+                "rules rollback" => await run.RollbackAsync(a.Positional.ElementAtOrDefault(2), ct),
                 "rules deploy" => await run.DeployAsync(ct),
                 "rules diff" => await run.DiffAsync(ct),
                 "rules pull" => await run.PullAsync(ct),
@@ -117,11 +125,16 @@ internal static class CliApp
             foreach (var sys in Selected(ProjectConfig.Subsystems))
             {
                 var file = $"{sys}.rules";
+                var tests = $"{sys}.rules.test.json";
                 config.Rules[sys] = file;
-                var full = Path.Combine(env.WorkingDirectory, file);
-                if (File.Exists(full)) { env.Out.WriteLine($"  kept    {file}"); continue; }
-                File.WriteAllText(full, Starter(sys));
-                env.Out.WriteLine($"  created {file}");
+                (config.Tests ??= new(StringComparer.Ordinal))[sys] = tests;
+                foreach (var (name, content) in new[] { (file, Starter(sys)), (tests, StarterTests(sys)) })
+                {
+                    var full = Path.Combine(env.WorkingDirectory, name);
+                    if (File.Exists(full)) { env.Out.WriteLine($"  kept    {name}"); continue; }
+                    File.WriteAllText(full, content);
+                    env.Out.WriteLine($"  created {name}");
+                }
             }
             config.Save(path);
             env.Out.WriteLine($"  created {ProjectConfig.FileName}");
@@ -151,6 +164,28 @@ internal static class CliApp
               // }
 
               """;
+
+        private static string StarterTests(string sys) => (sys == "database"
+            ? """
+              {
+                // Cases for `winche rules test` (also run by `winche rules deploy`). Each is evaluated against
+                // database.rules the way the server builds the request. Fields: name, expect (allow|deny),
+                // op (get|list|create|update|delete), path, auth (claims; omit = signed out), resource (the
+                // existing document), request (the incoming document), where (list), documents (get/exists).
+                "cases": [
+                  { "name": "signed out can't read a user", "expect": "deny", "op": "get", "path": "users/u1" }
+                ]
+              }
+              """
+            : """
+              {
+                // Cases for `winche rules test` (also run by `winche rules deploy`), evaluated against storage.rules.
+                // Fields: name, expect (allow|deny), op, path, auth (claims; omit = signed out), resource, request.
+                "cases": [
+                  { "name": "signed out can't read a file", "expect": "deny", "op": "get", "path": "userFiles/u1/a.png" }
+                ]
+              }
+              """) + "\n";
 
         // ----- login / logout --------------------------------------------------------------------
 
@@ -280,9 +315,45 @@ internal static class CliApp
             return 0;
         }
 
+        public async Task<int> TestAsync(CancellationToken ct)
+        {
+            var locals = LoadAll();
+            var config = RequireConfig();
+            if (!locals.Any(l => config.TestsPath(l.Subsystem) is not null))
+                throw new CliException($"No test files: add \"tests\": {{ \"database\": \"database.rules.test.json\" }} to {ProjectConfig.FileName}.");
+            return await RunTestsAsync(locals, verbose: true, ct) ? 0 : 1;
+        }
+
+        /// <summary>Runs each file's cases; prints failures (and passes when <paramref name="verbose"/>).</summary>
+        private async Task<bool> RunTestsAsync(List<LocalRules> locals, bool verbose, CancellationToken ct)
+        {
+            var config = RequireConfig();
+            int passed = 0, failed = 0;
+            foreach (var local in locals)
+            {
+                if (config.TestsPath(local.Subsystem) is not { } file) continue;
+                var display = Path.GetRelativePath(env.WorkingDirectory, file);
+                if (!File.Exists(file)) throw new CliException($"{display}: file not found ({local.Subsystem} tests in {ProjectConfig.FileName}).");
+
+                var outcomes = await RuleTests.RunAsync(local.Subsystem, local.RuleSet, file, ct);
+                env.Out.WriteLine($"{display} ({local.Subsystem})");
+                foreach (var o in outcomes)
+                {
+                    if (o.Passed) { passed++; if (verbose) env.Out.WriteLine($"  ✓ {o.Name}"); }
+                    else { failed++; env.Out.WriteLine($"  ✗ {o.Name} — {o.Detail}"); }
+                }
+                if (!verbose && outcomes.All(o => o.Passed)) env.Out.WriteLine($"  ✓ {outcomes.Count} passed");
+            }
+            env.Out.WriteLine(failed == 0 ? $"{passed} passed" : $"{passed} passed, {failed} failed");
+            return failed == 0;
+        }
+
         public async Task<int> DeployAsync(CancellationToken ct)
         {
             var locals = LoadAll();          // nothing is deployed unless every file is valid
+            if (!args.Flag("skip-tests") && locals.Any(l => RequireConfig().TestsPath(l.Subsystem) is not null)
+                && !await RunTestsAsync(locals, verbose: false, ct))
+                throw new CliException("Tests failed; nothing was deployed (--skip-tests to deploy anyway).");
             var client = await ClientAsync(ct);
             var dryRun = args.Flag("dry-run");
             var note = args.Value("message") ?? DefaultNote();
@@ -311,6 +382,101 @@ internal static class CliApp
             }
             return 0;
         }
+
+        /// <summary>The subsystems for history/rollback: --only, else the configured files, else both.</summary>
+        private IReadOnlyList<string> RemoteSubsystems()
+        {
+            var configured = Config is { } c ? ProjectConfig.Subsystems.Where(c.Rules.ContainsKey).ToList() : [];
+            return Selected(configured.Count > 0 && args.Value("only") is null ? configured : ProjectConfig.Subsystems);
+        }
+
+        public async Task<int> HistoryAsync(string? versionArg, CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var subsystems = RemoteSubsystems();
+
+            if (versionArg is not null)
+            {
+                var sys = Single(subsystems, "rules history <version>");
+                var version = ParseVersion(versionArg);
+                var chosen = await client.GetVersionAsync(sys, version, ct);
+                var active = await client.GetActiveAsync(sys, ct);
+                var text = RuleText.FormatRuleSet(RuleJson.DeserializeRuleSet(chosen.RulesJson));
+                if (active is null || active.Version == version)
+                {
+                    env.Out.WriteLine($"{sys} v{version}{(active?.Version == version ? " (active)" : "")}:");
+                    env.Out.WriteLine(text);
+                    return 0;
+                }
+                env.Out.WriteLine($"{sys} v{version} against the active v{active.Version}:");
+                WriteDiff(RuleText.FormatRuleSet(RuleJson.DeserializeRuleSet(active.RulesJson)), text, $"v{active.Version} (active)", $"v{version}");
+                return 0;
+            }
+
+            foreach (var sys in subsystems)
+            {
+                var versions = await client.GetVersionsAsync(sys, ct);
+                env.Out.WriteLine($"{sys}:");
+                if (versions.Count == 0)
+                {
+                    env.Out.WriteLine("  no versions yet (the app's starting rules apply)");
+                    continue;
+                }
+                foreach (var v in versions.OrderByDescending(v => v.Version))
+                {
+                    var note = v.Note ?? (v.RevertedFromVersion is { } from ? $"Reverted to v{from}" : "");
+                    env.Out.WriteLine(
+                        $"  {(v.IsActive ? "*" : " ")} v{v.Version,-4} {v.CreatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm}  {v.CreatedBy ?? "?",-24}  {note}".TrimEnd());
+                }
+            }
+            env.Out.WriteLine("(* = active)");
+            return 0;
+        }
+
+        public async Task<int> RollbackAsync(string? versionArg, CancellationToken ct)
+        {
+            if (versionArg is null) throw new CliException("Which version? Usage: winche rules rollback <version> [--only database|storage]", 2);
+            var version = ParseVersion(versionArg);
+            var client = await ClientAsync(ct);
+            var sys = Single(RemoteSubsystems(), "rules rollback");
+
+            var target = await client.GetVersionAsync(sys, version, ct);
+            var active = await client.GetActiveAsync(sys, ct);
+            if (active?.Version == version)
+            {
+                env.Out.WriteLine($"{sys}: v{version} is already active.");
+                return 0;
+            }
+
+            env.Out.WriteLine($"{sys}: make v{version} active again{(active is null ? "" : $" (replacing v{active.Version})")}:");
+            WriteDiff(
+                active is null ? "" : RuleText.FormatRuleSet(RuleJson.DeserializeRuleSet(active.RulesJson)),
+                RuleText.FormatRuleSet(RuleJson.DeserializeRuleSet(target.RulesJson)),
+                active is null ? "(no active version)" : $"v{active.Version} (active)", $"v{version}");
+
+            if (!args.Flag("yes"))
+            {
+                if (!env.Interactive) throw new CliException("Pass --yes to roll back without a prompt.", 2);
+                env.Out.Write("Roll back? [y/N] ");
+                var answer = env.In.ReadLine()?.Trim();
+                if (!string.Equals(answer, "y", StringComparison.OrdinalIgnoreCase) && !string.Equals(answer, "yes", StringComparison.OrdinalIgnoreCase))
+                {
+                    env.Out.WriteLine("Not rolled back.");
+                    return 1;
+                }
+            }
+
+            var saved = await client.RevertAsync(sys, version, ct);
+            env.Out.WriteLine($"{sys}: v{version} is active again as v{saved.Version}");
+            return 0;
+        }
+
+        private static int ParseVersion(string text) =>
+            int.TryParse(text.TrimStart('v', 'V'), out var v) && v > 0 ? v : throw new CliException($"'{text}' isn't a version number.", 2);
+
+        private static string Single(IReadOnlyList<string> subsystems, string command) => subsystems.Count == 1
+            ? subsystems[0]
+            : throw new CliException($"{command}: pick one with --only database or --only storage.", 2);
 
         public async Task<int> DiffAsync(CancellationToken ct)
         {
@@ -435,9 +601,9 @@ internal static class CliApp
 /// <summary>Positional words plus <c>--name value</c> / <c>--flag</c> options.</summary>
 internal sealed class Args
 {
-    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version"];
+    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes"];
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port"];
-    private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help" };
+    private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes" };
 
     public List<string> Positional { get; } = [];
     private readonly Dictionary<string, string?> _options = new(StringComparer.Ordinal);

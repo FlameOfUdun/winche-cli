@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>Ehsan Rashidi</Authors>
     <Copyright>Copyright © 2026 Ehsan Rashidi</Copyright>
     <PackageProjectUrl>https://github.com/FlameOfUdun/winche-cli</PackageProjectUrl>

@@ -15,7 +15,8 @@ builder.Services.AddSingleton<IArchive, NoOpArchive>();
 
 builder.Services.AddWincheConsole(o =>
 {
-    o.ConnectionString = builder.Configuration["Console:ConnectionString"];   // the rules editor's version store
+    o.ConnectionString = builder.Configuration["Console:ConnectionString"]
+        ?? throw new InvalidOperationException("Console:ConnectionString is required.");   // the rules editor's version store
     o.UseKeycloak(k =>
     {
         k.Server = builder.Configuration["Keycloak:Server"];
