@@ -24,6 +24,7 @@ using Winche.Storage.Constants;
 using Winche.Storage.DependencyInjection;
 using Winche.Storage.FileSystem;
 using Winche.Storage.S3.DependencyInjection;
+using Winche.Webhooks;
 using Winche.Storage.Interfaces;
 
 namespace Winche.Cli.Emulator;
@@ -154,6 +155,8 @@ internal sealed class EmulatorHost : IAsyncDisposable
         builder.Services.AddAuthentication().AddWincheTokens(t => t.TrustWincheAuth().UseSettings());
         static IReadOnlyDictionary<string, object?>? Claims(HttpContext http) => WincheClaims.From(http) ?? TestTokens.Claims(http);
 
+        builder.Services.AddWincheHooks(o => o.ConnectionString = connection);   // webhooks and ready-made actions
+        Winche.Webhooks.Auth.AuthHooksExtensions.AddWincheHooksForAuth(builder.Services);
         builder.Services.AddWincheDatabase(o =>
         {
             o.ConnectionString = connection;
@@ -162,6 +165,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.KeepHistory(TimeSpan.FromDays(7));   // the console's History tab
             o.LogRequests(r => r.SuccessSampleRate = 1.0);   // the Logs Explorer: every request, not a sample
             o.UseSettings();   // Database → Settings: indexes, expiry, limits
+            o.UseHooks(h => Winche.Webhooks.Database.DatabaseHooksExtensions.AddWincheHooks(h));   // the Hooks page
         }).AddWincheDatabaseWsApi();
         builder.Services.AddWincheStorage(o =>
         {
@@ -171,6 +175,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.LogRequests(r => r.SuccessSampleRate = 1.0);
             o.UseSettings();   // Storage → Settings: size limit, clean-up, moving files
             o.AllowS3Locations();   // … to an S3 or S3-compatible bucket
+            o.UseHooks(h => Winche.Webhooks.Storage.StorageHooksExtensions.AddWincheHooks(h));
             // Files in the data folder, through signed URLs on the emulator itself — the same package apps use.
             o.UseFileSystemArchive(fs =>
             {
