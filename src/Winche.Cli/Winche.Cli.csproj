@@ -16,7 +16,18 @@
     <InternalsVisibleTo Include="Winche.Cli.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <!-- winche emulators: the database, storage and console in one local process. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Winche.Rules" Version="4.1.0" />
+    <PackageReference Include="Winche.Database.AspNetCore.Rest" Version="11.0.0" />
+    <PackageReference Include="Winche.Database.AspNetCore.WebSockets" Version="11.0.0" />
+    <PackageReference Include="Winche.Storage.AspNetCore.Rest" Version="9.0.0" />
+    <PackageReference Include="Winche.Console" Version="4.1.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.12.0" />
+    <!-- Testcontainers brings SSH.NET 2025.1.0, which has known vulnerabilities; the fixed release. -->
+    <PackageReference Include="SSH.NET" Version="2026.0.0" />
     <!-- Its rule value comparer, so `rules test` compares values exactly as the database does. -->
     <PackageReference Include="Winche.Database" Version="11.0.0" />
   </ItemGroup>

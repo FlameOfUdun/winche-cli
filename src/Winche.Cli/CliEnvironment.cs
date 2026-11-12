@@ -30,10 +30,10 @@ internal sealed class CliEnvironment
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return new CliEnvironment
         {
-            Out = Console.Out,
-            Error = Console.Error,
-            In = Console.In,
-            Interactive = !Console.IsInputRedirected,
+            Out = System.Console.Out,
+            Error = System.Console.Error,
+            In = System.Console.In,
+            Interactive = !System.Console.IsInputRedirected,
             WorkingDirectory = Directory.GetCurrentDirectory(),
             ConfigDirectory = Path.Combine(string.IsNullOrEmpty(xdg) ? Path.Combine(home, ".config") : xdg, "winche"),
             GetVariable = Environment.GetEnvironmentVariable,

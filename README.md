@@ -28,6 +28,9 @@ winche rules history                                     # the console's version
 winche rules history 3 --only database                   # version 3 against the active one
 winche rules rollback 3 --only database                  # make version 3 active again
 winche rules pull                                        # write the live rules into the files
+winche emulators start                                   # database, storage and console locally
+winche emulators exec "npm test"                         # …around a command (CI)
+winche emulators token u1 role=admin                     # a sign-in token the emulators accept
 winche logout
 ```
 
@@ -152,6 +155,43 @@ are refreshed as needed.
 - The account needs the console's **Admin** role.
 - **CI:** pass a bearer token for the console client with `--token` or `WINCHE_TOKEN`, and the console with
   `--console` or `WINCHE_CONSOLE`.
+
+## Emulators
+
+`winche emulators start` runs Winche.Database (REST and the live WebSocket), Winche.Storage and the console in one
+local process — like Firebase's emulators:
+
+```text
+Winche emulator is running — rules from database.rules, storage.rules, reloaded on save
+
+  Database (REST)   http://localhost:9090/documents
+  Database (live)   ws://localhost:9090/documents/ws
+  Storage           http://localhost:9090/files
+  Console           http://localhost:9090/_console   (admin@winche.local / Winche-emulator1)
+  Postgres          temporary (gone when the emulator stops)
+
+14:02:11 PUT    /documents/users/u1 as u1 → 200
+14:02:12 GET    /documents/users/u1 as u2 → 403  ← denied by the rules
+14:02:30 ↻ database.rules reloaded
+```
+
+- **Postgres** starts in Docker for the session (or pass `--pg <connection string>` to use your own and keep the
+  data). **Files** go to a temporary folder (or `--data <dir>`), uploaded and downloaded through the emulator's own
+  URLs, the way S3's presigned URLs work in production.
+- **Rules** come from the files in `winche.json` and are re-applied the moment you save; a file with an error is
+  reported and the previous rules stay in force.
+- **Sign-in:** any JWT is accepted without checking its signature, and its claims are the caller's (`uid` from `uid`,
+  else `sub`). `winche emulators token <uid> [claim=value …]` prints an unsigned one, for `Authorization: Bearer …`
+  or the WebSocket's `?access_token=`.
+- **Each request** is printed with who made it and the result; `--quiet` turns that off, `--verbose` adds the
+  servers' own logs.
+- `--port` (default 9090) and `--host` (default `localhost`; `0.0.0.0` to reach it from a phone or another machine).
+
+`winche emulators exec "<command>"` starts the emulators, runs the command with `WINCHE_EMULATOR`,
+`WINCHE_EMULATOR_HOST`, `WINCHE_DATABASE_URL` and `WINCHE_STORAGE_URL` set, stops them, and exits with the command's
+exit code — for running an app's integration tests in CI.
+
+Needs Docker (unless `--pg`) and the .NET 10 runtime with ASP.NET Core.
 
 ## Editors
 

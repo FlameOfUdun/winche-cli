@@ -26,6 +26,10 @@ internal static class CliApp
           rules rollback <v>   Make version <v> active again (saved as a new version)
           rules diff           Show how the rules files differ from what the console enforces
           rules pull           Write the console's live rules into the rules files
+          emulators start      Run the database, storage and console locally (Postgres in Docker, rules reloaded on save)
+          emulators exec <cmd> Start the emulators, run <cmd> against them (e.g. your tests), stop, exit with its code
+          emulators token <uid> [claim=value …]
+                               Print a sign-in token the emulators accept
           lsp                  Run the language server for editors (the Winche VS Code extension starts it)
 
         Options:
@@ -40,7 +44,12 @@ internal static class CliApp
           --skip-tests         Deploy without running the tests first
           -y, --yes            Don't ask before a rollback
           --stdout             Print pulled rules instead of writing the files (pull)
-          --port <n>           Loopback port for the sign-in callback (login; default 9005)
+          --port <n>           Loopback port for the sign-in callback (login; default 9005), or the emulators' port (9090)
+          --host <name>        Emulators: the address to listen on (default localhost; 0.0.0.0 for devices)
+          --pg <connection>    Emulators: use this Postgres instead of a temporary one in Docker
+          --data <dir>         Emulators: keep stored files here (default: a temporary folder)
+          --quiet              Emulators: don't print each request
+          --verbose            Emulators: show the servers' own logs
           -h, --help           Show this help
           --version            Show the version
         """;
@@ -63,7 +72,7 @@ internal static class CliApp
             }
 
             using var http = new HttpClient(env.Http, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(60) };
-            var command = string.Join(' ', a.Positional.Take(a.Positional[0] == "rules" ? 2 : 1));
+            var command = string.Join(' ', a.Positional.Take(a.Positional[0] is "rules" or "emulators" ? 2 : 1));
             var run = new Run(env, a, http);
             return command switch
             {
@@ -78,7 +87,10 @@ internal static class CliApp
                 "rules deploy" => await run.DeployAsync(ct),
                 "rules diff" => await run.DiffAsync(ct),
                 "rules pull" => await run.PullAsync(ct),
-                "lsp" => await new LanguageServer(Console.OpenStandardInput(), Console.OpenStandardOutput(), env, http).RunAsync(ct),
+                "emulators start" => await run.EmulatorsAsync(null, ct),
+                "emulators exec" => await run.EmulatorsAsync(a.Positional.Count > 2 ? string.Join(' ', a.Positional.Skip(2)) : throw new CliException("Usage: winche emulators exec \"<command>\"", 2), ct),
+                "emulators token" => run.Token(a.Positional.Skip(2).ToList()),
+                "lsp" => await new LanguageServer(System.Console.OpenStandardInput(), System.Console.OpenStandardOutput(), env, http).RunAsync(ct),
                 _ => throw new CliException($"Unknown command '{string.Join(' ', a.Positional)}'. Run: winche --help", 2),
             };
         }
@@ -249,6 +261,83 @@ internal static class CliApp
               }
 
               """;
+
+        // ----- emulators -------------------------------------------------------------------------
+
+        public async Task<int> EmulatorsAsync(string? command, CancellationToken ct)
+        {
+            var port = 9090;
+            if (args.Value("port") is { } p && (!int.TryParse(p, out port) || port is < 0 or > 65535))
+                throw new CliException($"--port {p} isn't a port number.", 2);
+            var config = Config;
+            string? Rules(string sys) => config is not null && config.Rules.ContainsKey(sys) ? config.RulesPath(sys) : null;
+            var options = new Emulator.EmulatorOptions
+            {
+                Port = port,
+                Host = args.Value("host") ?? "localhost",
+                ConnectionString = args.Value("pg"),
+                DataDirectory = args.Value("data") is { } d ? Path.GetFullPath(d, env.WorkingDirectory) : null,
+                DatabaseRules = Rules("database"),
+                StorageRules = Rules("storage"),
+                Quiet = args.Flag("quiet") || command is not null,
+                Verbose = args.Flag("verbose"),
+            };
+
+            await using var host = await Emulator.EmulatorHost.StartAsync(options, env.Out, ct);
+            if (command is null)
+            {
+                host.PrintBanner(options.DatabaseRules, options.StorageRules);
+                env.Out.WriteLine("Press Ctrl+C to stop.");
+                using var either = CancellationTokenSource.CreateLinkedTokenSource(ct, host.Stopping);
+                try { await Task.Delay(Timeout.Infinite, either.Token); }
+                catch (OperationCanceledException) { env.Out.WriteLine("Stopping…"); }
+                return 0;
+            }
+
+            env.Out.WriteLine($"Emulators at {host.BaseUrl}; running: {command}");
+            var psi = OperatingSystem.IsWindows()
+                ? new System.Diagnostics.ProcessStartInfo("cmd.exe", ["/c", command])
+                : new System.Diagnostics.ProcessStartInfo("/bin/sh", ["-c", command]);
+            psi.WorkingDirectory = env.WorkingDirectory;
+            psi.Environment["WINCHE_EMULATOR"] = host.BaseUrl;
+            psi.Environment["WINCHE_EMULATOR_HOST"] = new Uri(host.BaseUrl).Authority;
+            psi.Environment["WINCHE_DATABASE_URL"] = host.BaseUrl + "/documents";
+            psi.Environment["WINCHE_STORAGE_URL"] = host.BaseUrl + "/files";
+            using var process = System.Diagnostics.Process.Start(psi) ?? throw new CliException($"Couldn't run: {command}");
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct, host.Stopping);
+            try
+            {
+                await process.WaitForExitAsync(stop.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                process.Kill(entireProcessTree: true);
+                throw;
+            }
+            env.Out.WriteLine($"{command} exited with {process.ExitCode}; stopping the emulators.");
+            return process.ExitCode;
+        }
+
+        public int Token(List<string> words)
+        {
+            if (words.Count == 0) throw new CliException("Usage: winche emulators token <uid> [claim=value …]", 2);
+            var claims = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var pair in words.Skip(1))
+            {
+                var eq = pair.IndexOf('=');
+                if (eq <= 0) throw new CliException($"'{pair}' isn't claim=value.", 2);
+                var value = pair[(eq + 1)..];
+                claims[pair[..eq]] = value switch
+                {
+                    "true" => true,
+                    "false" => false,
+                    _ when long.TryParse(value, out var l) => l,
+                    _ => value,
+                };
+            }
+            env.Out.WriteLine(Emulator.TestTokens.Mint(words[0], claims));
+            return 0;
+        }
 
         // ----- login / logout --------------------------------------------------------------------
 
@@ -652,8 +741,8 @@ internal static class CliApp
 /// <summary>Positional words plus <c>--name value</c> / <c>--flag</c> options.</summary>
 internal sealed class Args
 {
-    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear"];
-    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove"];
+    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose"];
+    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project" };
 
     public List<string> Positional { get; } = [];
