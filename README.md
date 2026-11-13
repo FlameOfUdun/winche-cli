@@ -31,6 +31,7 @@ winche rules pull                                        # write the live rules 
 winche emulators start                                   # database, storage and console locally
 winche emulators exec "npm test"                         # …around a command (CI)
 winche emulators token u1 role=admin                     # a sign-in token the emulators accept
+winche configure --url https://api.example.com          # lib/winche_options.dart for a Flutter/Dart app
 winche logout
 ```
 
@@ -38,6 +39,26 @@ Options: `-P/--project <alias>`, `--console <url>`, `--token <jwt>`, `--config <
 `-m/--message <note>` (deploy), `--force` (deploy unchanged files too), `--skip-tests` (deploy), `-y/--yes`
 (rollback without a prompt), `--stdout` (pull), `--port <n>` (login).
 Run `winche --help` for the full list.
+
+## Connecting an app
+
+Like `flutterfire configure`: in your Flutter app's folder,
+
+```sh
+winche configure --url https://api.example.com     # or no --url: the emulators on localhost:9090
+```
+
+reads the server's public setup (`/.well-known/winche`: which services it runs and where, and the sign-in providers'
+client ids) and writes `lib/winche_options.dart`, with a `DefaultWincheOptions` for each platform folder the app has
+(`--platforms android,ios,web` to choose, `--out` to write elsewhere). Then:
+
+```dart
+final app = await WincheFlutter.initializeApp(options: DefaultWincheOptions.currentPlatform);
+if (kDebugMode) app.useEmulator();   // winche emulators start
+```
+
+The console's **Apps** page shows the same file, to download. The emulators' project id is `projectId` in
+`winche.json` (default `demo`).
 
 ## `winche.json`
 

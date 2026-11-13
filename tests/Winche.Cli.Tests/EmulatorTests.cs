@@ -185,6 +185,43 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
     }
 
     [Fact]
+    public async Task Configure_writes_winche_options_dart_from_the_emulators_setup()
+    {
+        await using var host = await EmulatorHost.StartAsync(new EmulatorOptions
+        {
+            Port = 0, ConnectionString = fx.ConnectionString, DataDirectory = Path.Combine(_dir, "data"), ProjectId = "clinic",
+        }, TextWriter.Null, default);
+        Directory.CreateDirectory(Path.Combine(_dir, "android"));   // a Flutter app with two platforms
+        Directory.CreateDirectory(Path.Combine(_dir, "ios"));
+        File("pubspec.yaml", "name: clinic\n");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var exit = await CliApp.RunAsync(["configure", "--url", host.BaseUrl],
+            new CliEnvironment
+            {
+                Out = stdout, Error = stderr, WorkingDirectory = _dir, ConfigDirectory = _dir,
+                GetVariable = _ => null, Http = new HttpClientHandler(), OpenBrowser = _ => { },
+            });
+        Assert.True(exit == 0, stdout + "\n" + stderr);
+        var dart = System.IO.File.ReadAllText(Path.Combine(_dir, "lib", "winche_options.dart"));
+        Assert.Contains("static final android = WincheOptions(", dart);
+        Assert.Contains("static final ios = WincheOptions(", dart);
+        Assert.DoesNotContain("static final web", dart);
+        Assert.Contains("projectId: 'clinic',", dart);
+        Assert.Contains($"baseUrl: Uri.parse('{host.BaseUrl.TrimEnd('/')}'),", dart);
+        Assert.Contains("services:  database, storage, auth, functions", stdout.ToString());
+
+        var unreachable = await CliApp.RunAsync(["configure", "--url", "http://127.0.0.1:1"],
+            new CliEnvironment
+            {
+                Out = stdout, Error = stderr, WorkingDirectory = _dir, ConfigDirectory = _dir,
+                GetVariable = _ => null, Http = new HttpClientHandler(), OpenBrowser = _ => { },
+            });
+        Assert.NotEqual(0, unreachable);
+        Assert.Contains("Couldn't reach http://127.0.0.1:1", stderr.ToString());
+    }
+
+    [Fact]
     public void Tokens_carry_uid_and_claims()
     {
         var claims = TestTokens.Decode(TestTokens.Mint("u1", new Dictionary<string, object?> { ["role"] = "admin", ["level"] = 3L }))!;

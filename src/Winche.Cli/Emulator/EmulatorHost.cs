@@ -46,6 +46,8 @@ internal sealed record EmulatorOptions
     public string? Functions { get; init; }
     /// <summary>The deno program for functions.</summary>
     public string? DenoPath { get; init; }
+    /// <summary>The project id apps see in /.well-known/winche.</summary>
+    public string ProjectId { get; init; } = "demo";
 }
 
 /// <summary>
@@ -207,6 +209,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.AddStorageTab(b => b.UseLogs());
             o.AddAuthenticationTab();
             o.RequireTwoFactorForSettings = false;   // a local, seeded admin: no authenticator to enrol
+            o.ProjectId = options.ProjectId;
             o.AddLogsTab(l =>
             {
                 l.MinimumLevel = LogLevel.Information;   // locally, see what the servers say…
@@ -231,6 +234,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         app.MapWincheAuth();
         Winche.Functions.FunctionsEndpoints.MapWincheFunctions(app);
         app.MapWincheConsole("/_console");
+        Winche.Console.Apps.AppSetupEndpoints.MapWincheAppSetup(app);   // GET /.well-known/winche, for winche configure
 
         try
         {

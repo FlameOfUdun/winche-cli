@@ -26,6 +26,8 @@ internal static class CliApp
           rules rollback <v>   Make version <v> active again (saved as a new version)
           rules diff           Show how the rules files differ from what the console enforces
           rules pull           Write the console's live rules into the rules files
+          configure            Write lib/winche_options.dart for a Flutter or Dart app, from a Winche server
+                               (--url; default the emulators), like flutterfire configure
           functions init [<dir>]
                                Make a functions folder (default functions/): an example, deno.json, types for VS Code
           functions deploy [<dir>]
@@ -58,6 +60,8 @@ internal static class CliApp
           --verbose            Emulators: show the servers' own logs
           --url <server>       functions deploy: the Winche server, e.g. https://api.example.com
           --key <deploy key>   functions deploy: the key from the console (Functions → VS Code)
+          --out <file>         configure: where to write (default lib/winche_options.dart)
+          --platforms <list>   configure: android,ios,macos,web,windows,linux (default: the app's platform folders)
           -h, --help           Show this help
           --version            Show the version
         """;
@@ -95,6 +99,7 @@ internal static class CliApp
                 "rules deploy" => await run.DeployAsync(ct),
                 "rules diff" => await run.DiffAsync(ct),
                 "rules pull" => await run.PullAsync(ct),
+                "configure" => await run.ConfigureAsync(ct),
                 "functions init" => run.FunctionsInit(a.Positional.ElementAtOrDefault(2)),
                 "functions deploy" => await run.FunctionsDeployAsync(a.Positional.ElementAtOrDefault(2), ct),
                 "emulators start" => await run.EmulatorsAsync(null, ct),
@@ -296,6 +301,60 @@ internal static class CliApp
             return 0;
         }
 
+        // ----- configure ---------------------------------------------------------------------------
+
+        /// <summary>
+        /// Reads the server's /.well-known/winche and writes lib/winche_options.dart: a DefaultWincheOptions per
+        /// platform, for WincheFlutter.initializeApp(options: DefaultWincheOptions.currentPlatform).
+        /// </summary>
+        public async Task<int> ConfigureAsync(CancellationToken ct)
+        {
+            var url = (args.Value("url") ?? env.GetVariable("WINCHE_SERVER") ?? $"http://localhost:{args.Value("port") ?? "9090"}").TrimEnd('/');
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var server) || server.Scheme is not ("http" or "https"))
+                throw new CliException($"{url} isn't an address. Pass --url https://api.example.com", 2);
+
+            Winche.Console.Apps.AppSetup setup;
+            try
+            {
+                using var response = await http.GetAsync(new Uri(server, "/.well-known/winche"), ct);
+                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                    throw new CliException($"{url} doesn't publish its setup (/.well-known/winche). Is it a Winche Server or the emulators, up to date?");
+                response.EnsureSuccessStatusCode();
+                setup = await System.Net.Http.Json.HttpContentJsonExtensions.ReadFromJsonAsync<Winche.Console.Apps.AppSetup>(
+                    response.Content, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web), ct)
+                    ?? throw new CliException($"{url} sent an empty setup.");
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new CliException(args.Value("url") is null && env.GetVariable("WINCHE_SERVER") is null
+                    ? $"Couldn't reach the emulators at {url} ({ex.Message}). Start them (winche emulators start) or pass --url."
+                    : $"Couldn't reach {url}: {ex.Message}");
+            }
+
+            var platforms = args.Value("platforms") is { } list
+                ? list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                : Winche.Console.Apps.AppSetup.AllPlatforms.Where(p => Directory.Exists(Path.Combine(env.WorkingDirectory, p))).ToArray();
+            var unknown = platforms.Where(p => !Winche.Console.Apps.AppSetup.AllPlatforms.Contains(p.ToLowerInvariant())).ToList();
+            if (unknown.Count > 0)
+                throw new CliException($"Unknown platform {string.Join(", ", unknown)}: use {string.Join(", ", Winche.Console.Apps.AppSetup.AllPlatforms)}.", 2);
+            if (platforms.Length == 0) platforms = [.. Winche.Console.Apps.AppSetup.AllPlatforms];
+
+            var target = Path.GetFullPath(args.Value("out") ?? Path.Combine("lib", "winche_options.dart"), env.WorkingDirectory);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            await File.WriteAllTextAsync(target, setup.DartOptionsFile(platforms), ct);
+
+            env.Out.WriteLine($"Wrote {Path.GetRelativePath(env.WorkingDirectory, target)} for project {setup.ProjectId} at {setup.BaseUrl}");
+            env.Out.WriteLine($"  platforms: {string.Join(", ", platforms)}");
+            env.Out.WriteLine($"  services:  {(setup.Services.Count == 0 ? "none" : string.Join(", ", setup.Services.Select(s => s.Id)))}");
+            if (setup.Providers.Where(p => p.ClientIds.Count > 1).Select(p => p.Name).ToList() is { Count: > 0 } several)
+                env.Out.WriteLine($"  {string.Join(", ", several)}: several client ids; the file lists them for you to pick one per platform.");
+            if (!File.Exists(Path.Combine(env.WorkingDirectory, "pubspec.yaml")))
+                env.Out.WriteLine("  (no pubspec.yaml here: run this in your app's folder, or pass --out)");
+            env.Out.WriteLine("Next: flutter pub add winche_flutter winche_core, then in main():");
+            env.Out.WriteLine("  final app = await WincheFlutter.initializeApp(options: DefaultWincheOptions.currentPlatform);");
+            return 0;
+        }
+
         public async Task<int> FunctionsDeployAsync(string? dir, CancellationToken ct)
         {
             var url = args.Value("url") ?? env.GetVariable("WINCHE_SERVER")
@@ -324,6 +383,7 @@ internal static class CliApp
                 Functions = FunctionsDir(null) is var fdir && Directory.Exists(fdir) ? fdir : null,
                 Quiet = args.Flag("quiet") || command is not null,
                 Verbose = args.Flag("verbose"),
+                ProjectId = config?.ProjectId ?? "demo",
             };
 
             if (options.Functions is not null) options = options with { DenoPath = await DenoInstaller.EnsureAsync(env, http, ct) };
@@ -794,7 +854,7 @@ internal static class CliApp
 internal sealed class Args
 {
     private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose"];
-    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key"];
+    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project" };
 
     public List<string> Positional { get; } = [];

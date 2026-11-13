@@ -24,6 +24,8 @@ internal sealed class ProjectConfig
     [JsonPropertyName("projects")] public Dictionary<string, string>? Projects { get; set; }
     [JsonPropertyName("rules")] public Dictionary<string, string> Rules { get; set; } = new(StringComparer.Ordinal);
     [JsonPropertyName("tests")] public Dictionary<string, string>? Tests { get; set; }
+    /// <summary>The project's id, for apps' winche_options.dart (the emulator's /.well-known/winche; default "demo").</summary>
+    [JsonPropertyName("projectId")] public string? ProjectId { get; set; }
     /// <summary>The functions folder (winche functions init writes "functions").</summary>
     [JsonPropertyName("functions")] public string? Functions { get; set; }
 
