@@ -125,7 +125,7 @@ internal static class FunctionsFolder
         if (!response.IsSuccessStatusCode)
         {
             env.Error.WriteLine($"Not deployed: {body["error"]?["message"]?.GetValue<string>() ?? response.ReasonPhrase}");
-            foreach (var p in body["error"]?["problems"] as JsonArray ?? []) env.Error.WriteLine($"  {p}");
+            foreach (var p in body["error"]?["details"]?["problems"] as JsonArray ?? []) env.Error.WriteLine($"  {p}");
             return 1;
         }
         var fns = body["functions"] as JsonArray ?? [];

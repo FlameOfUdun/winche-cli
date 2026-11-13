@@ -62,7 +62,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         Assert.Equal("From the laptop", sent["note"]!.GetValue<string>());
         Assert.Contains("Deployed version 4: hello.", output);
 
-        var refusing = new Recorder { Answer = HttpStatusCode.BadRequest, Reply = """{ "error": { "message": "The code doesn't build.", "problems": ["index.ts:3: Expected ';'"] } }""" };
+        var refusing = new Recorder { Answer = HttpStatusCode.BadRequest, Reply = """{ "error": { "code": "invalid-argument", "reason": "build-failed", "message": "The code doesn't build.", "details": { "problems": ["index.ts:3: Expected ';'"] } } }""" };
         (exit, _, err) = await Run(refusing, null, "functions", "deploy", "--url", "https://api.example.com", "--key", "k");
         Assert.Equal(1, exit);
         Assert.Contains("Not deployed: The code doesn't build.", err);
