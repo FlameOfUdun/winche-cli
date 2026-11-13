@@ -2,6 +2,7 @@ using Winche.Database.Authorization;
 using Winche.Rules;
 using Winche.Rules.Evaluation;
 using Winche.Rules.Querying;
+using Winche.Values;
 
 namespace Winche.Cli;
 
@@ -29,8 +30,7 @@ internal static class RuleTests
     {
         var checks = RuleTestParser.Parse(tests);
         var database = subsystem == "database";
-        var comparer = database ? (IRuleValueComparer)WincheRuleValueComparer.Instance : new DefaultRuleValueComparer();
-        var engine = new RuleEngine(new StaticRuleSetRepository(ruleSet), comparer);
+        var engine = new RuleEngine(new StaticRuleSetRepository(ruleSet));
 
         var outcomes = new List<Outcome>();
         foreach (var check in checks)
@@ -42,12 +42,12 @@ internal static class RuleTests
     {
         var time = c.Time ?? DateTimeOffset.UtcNow;
         var documents = c.Documents.ToDictionary(kv => kv.Key, kv => Resource(kv.Value, kv.Key, database, time), StringComparer.Ordinal);
-        var request = RuleValue.Map(new Dictionary<string, RuleValue>
+        var request = new MapValue(new Dictionary<string, Value>
         {
             ["auth"] = Auth(c.Auth),
             ["resource"] = Resource(c.Incoming, c.Path, database, time),
-            ["method"] = RuleValue.String(c.OperationName),
-            ["time"] = RuleValue.Timestamp(time),
+            ["method"] = new StringValue(c.OperationName),
+            ["time"] = new TimestampValue(time),
         });
         var provider = new MapProvider(documents);
 
@@ -66,39 +66,42 @@ internal static class RuleTests
     }
 
     /// <summary><c>request.auth</c>: null when signed out, else <c>{uid, token: every claim}</c>.</summary>
-    private static RuleValue Auth(RuleValue claims)
+    private static Value Auth(Value claims)
     {
-        if (claims.Kind != RuleValueKind.Map || claims.AsMap.Count == 0) return RuleValue.Null;
-        var uid = claims.AsMap.TryGetValue("uid", out var u) && u.Kind != RuleValueKind.Null
-            ? u.Kind == RuleValueKind.Int ? RuleValue.String(u.AsInt.ToString(System.Globalization.CultureInfo.InvariantCulture)) : u
-            : RuleValue.Null;
-        return RuleValue.Map(new Dictionary<string, RuleValue> { ["uid"] = uid, ["token"] = claims });
+        if (claims is not MapValue { Fields.Count: > 0 } map) return RuleValues.Null;
+        var uid = map.Fields.GetValueOrDefault("uid") switch
+        {
+            null or NullValue => RuleValues.Null,
+            IntegerValue i => new StringValue(i.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            var u => u,
+        };
+        return new MapValue(new Dictionary<string, Value> { ["uid"] = uid, ["token"] = claims });
     }
 
     /// <summary>A document as Winche.Database exposes it to rules (fields + data + storage columns); files as given.</summary>
-    private static RuleValue Resource(RuleValue fields, string path, bool database, DateTimeOffset time)
+    private static Value Resource(Value fields, string path, bool database, DateTimeOffset time)
     {
-        if (!database || fields.Kind != RuleValueKind.Map) return fields;
-        var map = new Dictionary<string, RuleValue>(fields.AsMap, StringComparer.Ordinal);
-        var data = RuleValue.Map(new Dictionary<string, RuleValue>(map, StringComparer.Ordinal));
+        if (!database || fields is not MapValue given) return fields;
+        var map = new Dictionary<string, Value>(given.Fields, StringComparer.Ordinal);
+        var data = given;
         var segments = path.Split('/');
-        map["id"] = RuleValue.String(segments[^1]);
-        map["path"] = RuleValue.Path(path);
-        map["collection"] = RuleValue.String(segments.Length > 1 ? segments[^2] : "");
-        map.TryAdd("createdAt", RuleValue.Timestamp(time));
-        map.TryAdd("updatedAt", RuleValue.Timestamp(time));
-        map.TryAdd("version", RuleValue.Int(1));
+        map["id"] = new StringValue(segments[^1]);
+        map["path"] = new ReferenceValue(path);
+        map["collection"] = new StringValue(segments.Length > 1 ? segments[^2] : "");
+        map.TryAdd("createdAt", new TimestampValue(time));
+        map.TryAdd("updatedAt", new TimestampValue(time));
+        map.TryAdd("version", new IntegerValue(1));
         map.TryAdd("data", data);
-        return RuleValue.Map(map);
+        return new MapValue(map);
     }
 
     /// <summary>get() / exists() over the test's documents.</summary>
-    private sealed class MapProvider(Dictionary<string, RuleValue> documents) : IRuleResourceProvider
+    private sealed class MapProvider(Dictionary<string, Value> documents) : IRuleResourceProvider
     {
         public Task<bool> ExistsAsync(string path, CancellationToken ct = default) =>
             Task.FromResult(documents.ContainsKey(path.Trim('/')));
 
-        public Task<RuleValue> GetAsync(string path, CancellationToken ct = default) =>
-            Task.FromResult(documents.GetValueOrDefault(path.Trim('/'), RuleValue.Null));
+        public Task<Value> GetAsync(string path, CancellationToken ct = default) =>
+            Task.FromResult(documents.GetValueOrDefault(path.Trim('/'), RuleValues.Null));
     }
 }

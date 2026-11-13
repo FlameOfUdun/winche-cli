@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Winche.Rules;
 using Winche.Rules.Expressions;
+using Winche.Values;
 
 namespace Winche.Cli;
 
@@ -20,24 +21,24 @@ internal sealed record RuleCheck(
     RuleOperation Operation,
     string OperationName,
     string Path,
-    RuleValue Auth,                                   // the claims map, or Null when signed out
-    RuleValue Resource,                               // the existing document/file, or Null
-    RuleValue Incoming,                               // `with { ... }`, or Null
+    Value Auth,                                   // the claims map, or Null when signed out
+    Value Resource,                               // the existing document/file, or Null
+    Value Incoming,                               // `with { ... }`, or Null
     IReadOnlyList<QueryFilter> Where,
     bool CollectionGroup,
     DateTimeOffset? Time,
-    IReadOnlyDictionary<string, RuleValue> Documents)
+    IReadOnlyDictionary<string, Value> Documents)
 {
     public string Describe()
     {
         var sb = new StringBuilder($"{(ExpectAllow ? "allow" : "deny")} {OperationName} {(CollectionGroup ? "group " : "")}{Path}");
-        if (Incoming.Kind != RuleValueKind.Null) sb.Append(" with {…}");
+        if (Incoming is not NullValue) sb.Append(" with {…}");
         if (Where.Count > 0) sb.Append(" where ").Append(string.Join(" && ", Where.Select(w => $"{string.Join('.', w.Field)} {w.OperatorText} …")));
         return sb.ToString();
     }
 }
 
-internal sealed record QueryFilter(IReadOnlyList<string> Field, ComparisonOperator Operator, string OperatorText, RuleValue Value);
+internal sealed record QueryFilter(IReadOnlyList<string> Field, ComparisonOperator Operator, string OperatorText, Value Value);
 
 /// <summary>
 /// Parses rule tests, written in the rules language's style:
@@ -101,7 +102,7 @@ internal sealed class RuleTestParser
     private List<RuleCheck> ParseFile()
     {
         var checks = new List<RuleCheck>();
-        var shared = new Dictionary<string, RuleValue>(StringComparer.Ordinal);
+        var shared = new Dictionary<string, Value>(StringComparer.Ordinal);
         var names = new HashSet<string>(StringComparer.Ordinal);
         while (true)
         {
@@ -129,13 +130,13 @@ internal sealed class RuleTestParser
         return checks;
     }
 
-    private void ParseTest(string name, Dictionary<string, RuleValue> shared, List<RuleCheck> checks)
+    private void ParseTest(string name, Dictionary<string, Value> shared, List<RuleCheck> checks)
     {
         Expect('{');
-        var auth = RuleValue.Null;
-        var resource = RuleValue.Null;
+        Value auth = RuleValues.Null;
+        Value resource = RuleValues.Null;
         DateTimeOffset? time = null;
-        var documents = new Dictionary<string, RuleValue>(shared, StringComparer.Ordinal);
+        var documents = new Dictionary<string, Value>(shared, StringComparer.Ordinal);
         var count = 0;
 
         while (true)
@@ -173,8 +174,8 @@ internal sealed class RuleTestParser
         if (count == 0) Fail($"test \"{name}\" has no allow or deny line", _pos - 1);
     }
 
-    private RuleCheck ParseCheck(string test, bool allow, int start, RuleValue auth, RuleValue resource,
-        DateTimeOffset? time, Dictionary<string, RuleValue> documents)
+    private RuleCheck ParseCheck(string test, bool allow, int start, Value auth, Value resource,
+        DateTimeOffset? time, Dictionary<string, Value> documents)
     {
         Skip();
         var opAt = _pos;
@@ -190,7 +191,7 @@ internal sealed class RuleTestParser
 
         var path = ParsePath();
 
-        var incoming = RuleValue.Null;
+        Value incoming = RuleValues.Null;
         var where = new List<QueryFilter>();
         while (true)
         {
@@ -203,7 +204,7 @@ internal sealed class RuleTestParser
                 Skip();
                 var at = _pos;
                 incoming = ParseValue();
-                if (incoming.Kind != RuleValueKind.Map) Fail("`with` takes a map: with { field: value }", at);
+                if (incoming is not MapValue) Fail("`with` takes a map: with { field: value }", at);
             }
             else if (kw == "where")
             {
@@ -218,12 +219,12 @@ internal sealed class RuleTestParser
             }
         }
 
-        if (op == RuleOperation.Create && incoming.Kind == RuleValueKind.Null)
+        if (op == RuleOperation.Create && incoming is NullValue)
             Fail("a create needs the new document: create <path> with { ... }", start);
 
         var (line, _) = Position(start);
         return new RuleCheck(test, line, allow, op, opName, path, auth, resource, incoming, where, group, time,
-            new Dictionary<string, RuleValue>(documents, StringComparer.Ordinal));
+            new Dictionary<string, Value>(documents, StringComparer.Ordinal));
     }
 
     private QueryFilter ParseFilter()
@@ -241,7 +242,7 @@ internal sealed class RuleTestParser
         throw new InvalidOperationException();
     }
 
-    private void ParseDocuments(Dictionary<string, RuleValue> into)
+    private void ParseDocuments(Dictionary<string, Value> into)
     {
         Expect('{');
         while (true)
@@ -254,24 +255,24 @@ internal sealed class RuleTestParser
             Skip();
             var at = _pos;
             var value = ParseValue();
-            if (value.Kind != RuleValueKind.Map) Fail("a document is a map: path: { field: value }", at);
+            if (value is not MapValue) Fail("a document is a map: path: { field: value }", at);
             into[path] = value;
             Skip();
             TryChar(',');
         }
     }
 
-    private RuleValue MapOrNone(string what)
+    private Value MapOrNone(string what)
     {
         Skip();
         var at = _pos;
         if (Peek() != '{')
         {
-            if (Word() == "none") return RuleValue.Null;
+            if (Word() == "none") return RuleValues.Null;
             Fail($"{what} takes a map {{ field: value }} or none", at);
         }
         var map = ParseValue();
-        return what == "auth" && map.AsMap.Count == 0 ? RuleValue.Null : map;
+        return what == "auth" && map is MapValue { Fields.Count: 0 } ? RuleValues.Null : map;
     }
 
     private DateTimeOffset ParseTime()
@@ -279,15 +280,15 @@ internal sealed class RuleTestParser
         Skip();
         var at = _pos;
         var v = ParseValue();
-        if (v.Kind == RuleValueKind.Timestamp) return v.AsTimestamp;
-        if (v.Kind == RuleValueKind.String && DateTimeOffset.TryParse(v.AsString, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var t)) return t;
+        if (v is TimestampValue ts) return ts.Value;
+        if (v is StringValue str && DateTimeOffset.TryParse(str.Value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var t)) return t;
         Fail("time takes timestamp('2026-01-01T00:00:00Z')", at);
         throw new InvalidOperationException();
     }
 
     // ----- values ----------------------------------------------------------------------------
 
-    private RuleValue ParseValue()
+    private Value ParseValue()
     {
         Skip();
         var at = _pos;
@@ -295,29 +296,29 @@ internal sealed class RuleTestParser
         switch (c)
         {
             case '\'' or '"':
-                return RuleValue.String(ParseString());
+                return new StringValue(ParseString());
             case '[':
                 _pos++;
-                var items = new List<RuleValue>();
+                var items = new List<Value>();
                 Skip();
-                if (TryChar(']')) return RuleValue.List(items);
+                if (TryChar(']')) return new ArrayValue(items);
                 do { items.Add(ParseValue()); Skip(); } while (TryChar(',') && !PeekIs(']'));
                 Expect(']');
-                return RuleValue.List(items);
+                return new ArrayValue(items);
             case '{':
                 _pos++;
-                var map = new Dictionary<string, RuleValue>(StringComparer.Ordinal);
+                var map = new Dictionary<string, Value>(StringComparer.Ordinal);
                 while (true)
                 {
                     Skip();
-                    if (TryChar('}')) return RuleValue.Map(map);
+                    if (TryChar('}')) return new MapValue(map);
                     var keyAt = _pos;
                     var key = Peek() is '\'' or '"' ? ParseString() : Identifier("a key");
                     if (map.ContainsKey(key)) Fail($"key '{key}' appears twice", keyAt);
                     Expect(':');
                     map[key] = ParseValue();
                     Skip();
-                    if (!TryChar(',')) { Expect('}'); return RuleValue.Map(map); }
+                    if (!TryChar(',')) { Expect('}'); return new MapValue(map); }
                 }
         }
 
@@ -326,9 +327,9 @@ internal sealed class RuleTestParser
         var word = Word();
         switch (word)
         {
-            case "true": return RuleValue.Bool(true);
-            case "false": return RuleValue.Bool(false);
-            case "null": return RuleValue.Null;
+            case "true": return RuleValues.True;
+            case "false": return RuleValues.False;
+            case "null": return RuleValues.Null;
             case "timestamp" or "path" or "bytes":
                 Expect('(');
                 Skip();
@@ -339,9 +340,9 @@ internal sealed class RuleTestParser
                 {
                     return word switch
                     {
-                        "timestamp" => RuleValue.Timestamp(DateTimeOffset.Parse(arg, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)),
-                        "path" => RuleValue.Path(arg.Trim('/')),
-                        _ => RuleValue.Bytes(Convert.FromBase64String(arg)),
+                        "timestamp" => new TimestampValue(DateTimeOffset.Parse(arg, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)),
+                        "path" => new ReferenceValue(arg.Trim('/')),
+                        _ => new BytesValue(Convert.FromBase64String(arg)),
                     };
                 }
                 catch (FormatException)
@@ -354,14 +355,14 @@ internal sealed class RuleTestParser
         throw new InvalidOperationException();
     }
 
-    private RuleValue ParseNumber()
+    private Value ParseNumber()
     {
         var start = _pos;
         if (Peek() == '-') _pos++;
         while (!AtEnd && (char.IsAsciiDigit(Peek()) || Peek() is '.' or 'e' or 'E' || (Peek() is '+' or '-' && _text[_pos - 1] is 'e' or 'E'))) _pos++;
         var s = _text[start.._pos];
-        if (long.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var l)) return RuleValue.Int(l);
-        if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) return RuleValue.Double(d);
+        if (long.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var l)) return new IntegerValue(l);
+        if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) return new DoubleValue(d);
         Fail($"'{s}' isn't a number", start);
         throw new InvalidOperationException();
     }
