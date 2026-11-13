@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 using Testcontainers.PostgreSql;
 using Winche.Auth.AspNetCore;
 using Winche.Auth.DependencyInjection;
-using Winche.Config;
+using Winche.Core;
 using Winche.Console;
 using Winche.Database.AspNetCore.DependencyInjection;
 using Winche.Database.AspNetCore.Rest.DependencyInjection;
