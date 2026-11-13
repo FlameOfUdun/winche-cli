@@ -33,7 +33,7 @@ public sealed class NoOpArchive : IArchive
         _sizes[path] = sizeBytes;
         return Task.FromResult(new UploadSession { Url = $"https://fake-archive.test/upload/{path}", ExpiresAt = DateTime.UtcNow.AddMinutes(15) });
     }
-    public Task<DownloadSession> GenerateDownloadUrlAsync(string path, CancellationToken ct = default) =>
+    public Task<DownloadSession> GenerateDownloadUrlAsync(string path, DownloadHeaders? headers = null, CancellationToken ct = default) =>
         Task.FromResult(new DownloadSession { Url = $"https://fake-archive.test/download/{path}", ExpiresAt = DateTime.UtcNow.AddMinutes(15) });
 
     public Task<string> CreateMultipartUploadAsync(string path, string mimeType, long sizeBytes, CancellationToken ct = default) => throw NoMultipart();
