@@ -7,8 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- A host app as the CLI meets it: Winche.Database + Winche.Storage + the console with both rules editors. -->
-    <PackageReference Include="Winche.Console" Version="4.0.0" />
-    <PackageReference Include="Winche.Database" Version="11.0.0" />
-    <PackageReference Include="Winche.Storage" Version="9.0.0" />
+    <PackageReference Include="Winche.Console" Version="4.1.0" />
+    <PackageReference Include="Winche.Database" Version="11.1.0" />
+    <PackageReference Include="Winche.Storage" Version="9.1.0" />
   </ItemGroup>
 </Project>

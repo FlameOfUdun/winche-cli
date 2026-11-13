@@ -16,9 +16,10 @@ public sealed class NoOpArchive : IArchive
     public Task DeleteAsync(string path, CancellationToken ct = default) => Task.CompletedTask;
     public Task DeleteObjectsAsync(IEnumerable<string> paths, CancellationToken ct = default) => Task.CompletedTask;
 
-    // Objects are treated as always-present: hand back a canned ETag rather than probing a real store.
-    public Task<string?> GetObjectETagAsync(string path, CancellationToken ct = default) =>
-        Task.FromResult<string?>("\"noop-etag\"");
+    // Objects are treated as always-present, as big as their upload link said: no real store to probe.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _sizes = new();
+    public Task<ArchiveObjectInfo?> HeadAsync(string path, CancellationToken ct = default) =>
+        Task.FromResult<ArchiveObjectInfo?>(new ArchiveObjectInfo(_sizes.GetValueOrDefault(path), "\"noop-etag\""));
 
     // No real object store to enumerate; yield nothing.
     public async IAsyncEnumerable<ArchivedObject> ListObjectsAsync(string? prefix, [EnumeratorCancellation] CancellationToken ct = default)
@@ -27,12 +28,15 @@ public sealed class NoOpArchive : IArchive
         yield break;
     }
 
-    public Task<UploadSession> GenerateUploadUrlAsync(string path, string mimeType, long sizeBytes, CancellationToken ct = default) =>
-        Task.FromResult(new UploadSession { Url = $"https://fake-archive.test/upload/{path}", ExpiresAt = DateTime.UtcNow.AddMinutes(15) });
+    public Task<UploadSession> GenerateUploadUrlAsync(string path, string mimeType, long sizeBytes, CancellationToken ct = default)
+    {
+        _sizes[path] = sizeBytes;
+        return Task.FromResult(new UploadSession { Url = $"https://fake-archive.test/upload/{path}", ExpiresAt = DateTime.UtcNow.AddMinutes(15) });
+    }
     public Task<DownloadSession> GenerateDownloadUrlAsync(string path, CancellationToken ct = default) =>
         Task.FromResult(new DownloadSession { Url = $"https://fake-archive.test/download/{path}", ExpiresAt = DateTime.UtcNow.AddMinutes(15) });
 
-    public Task<string> CreateMultipartUploadAsync(string path, string mimeType, CancellationToken ct = default) => throw NoMultipart();
+    public Task<string> CreateMultipartUploadAsync(string path, string mimeType, long sizeBytes, CancellationToken ct = default) => throw NoMultipart();
     public Task<UploadSession> SignPartAsync(string path, string uploadId, int partNumber, CancellationToken ct = default) => throw NoMultipart();
     public Task<string?> CompleteMultipartUploadAsync(string path, string uploadId, CancellationToken ct = default) => throw NoMultipart();
     public Task<IEnumerable<FilePart>> ListPartsAsync(string path, string uploadId, CancellationToken ct = default) => throw NoMultipart();
