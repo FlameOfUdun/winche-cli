@@ -350,7 +350,7 @@ internal static class CliApp
                 env.Out.WriteLine($"  {string.Join(", ", several)}: several client ids; the file lists them for you to pick one per platform.");
             if (!File.Exists(Path.Combine(env.WorkingDirectory, "pubspec.yaml")))
                 env.Out.WriteLine("  (no pubspec.yaml here: run this in your app's folder, or pass --out)");
-            env.Out.WriteLine("Next: flutter pub add winche_flutter winche_core, then in main():");
+            env.Out.WriteLine("Next: flutter pub add winche_flutter, then in main():");
             env.Out.WriteLine("  final app = await WincheFlutter.initializeApp(options: DefaultWincheOptions.currentPlatform);");
             return 0;
         }
