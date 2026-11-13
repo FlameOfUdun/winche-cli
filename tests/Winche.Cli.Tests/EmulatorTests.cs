@@ -42,8 +42,8 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         return client;
     }
 
-    private static string Doc(string path) => "/documents/" + Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
-    private static string FilePath(string path) => "/files/" + Convert.ToBase64String(Encoding.UTF8.GetBytes(path)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    private static string Doc(string path) => "/documents/v1/" + Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
+    private static string FilePath(string path) => "/files/v1/" + Convert.ToBase64String(Encoding.UTF8.GetBytes(path)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private static Task<HttpResponseMessage> Put(HttpClient c, string path, string name) =>
         c.PutAsync(Doc(path), JsonContent.Create(new { fields = new { name = new { stringValue = name } } }));
@@ -86,8 +86,8 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         Assert.Contains("the previous rules stay in force", log.ToString());
 
         // Requests are logged with who made them and what happened.
-        Assert.Contains("GET    /documents/users/u1 as u2 → 403  ← denied by the rules", log.ToString());
-        Assert.Contains("PUT    /documents/users/u1 as u1 → 200", log.ToString());
+        Assert.Contains("GET    /documents/v1/users/u1 as u2 → 403  ← denied by the rules", log.ToString());
+        Assert.Contains("PUT    /documents/v1/users/u1 as u1 → 200", log.ToString());
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         var stderr = new StringWriter();
         var exit = await CliApp.RunAsync(
             ["emulators", "exec", "--port", "0", "--pg", fx.ConnectionString, "--data", Path.Combine(_dir, "data"),
-             "curl -sf \"$WINCHE_DATABASE_URL/ping\" > /dev/null && test \"$WINCHE_STORAGE_URL\" = \"$WINCHE_EMULATOR/files\" && exit 7"],
+             "curl -sf \"$WINCHE_DATABASE_URL/ping\" > /dev/null && test \"$WINCHE_STORAGE_URL\" = \"$WINCHE_EMULATOR/files/v1\" && exit 7"],
             new CliEnvironment
             {
                 Out = stdout, Error = stderr, WorkingDirectory = _dir, ConfigDirectory = _dir,

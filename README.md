@@ -170,8 +170,8 @@ Winche emulator is running — rules from database.rules, storage.rules, reloade
   Console           http://localhost:9090/_console   (admin@winche.local / Winche-emulator1)
   Postgres          temporary (gone when the emulator stops)
 
-14:02:11 PUT    /documents/users/u1 as u1 → 200
-14:02:12 GET    /documents/users/u1 as u2 → 403  ← denied by the rules
+14:02:11 PUT    /documents/v1/users/u1 as u1 → 200
+14:02:12 GET    /documents/v1/users/u1 as u2 → 403  ← denied by the rules
 14:02:30 ↻ database.rules reloaded
 ```
 

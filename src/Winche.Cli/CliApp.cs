@@ -345,8 +345,8 @@ internal static class CliApp
             psi.WorkingDirectory = env.WorkingDirectory;
             psi.Environment["WINCHE_EMULATOR"] = host.BaseUrl;
             psi.Environment["WINCHE_EMULATOR_HOST"] = new Uri(host.BaseUrl).Authority;
-            psi.Environment["WINCHE_DATABASE_URL"] = host.BaseUrl + "/documents";
-            psi.Environment["WINCHE_STORAGE_URL"] = host.BaseUrl + "/files";
+            psi.Environment["WINCHE_DATABASE_URL"] = host.BaseUrl + "/documents/v1";
+            psi.Environment["WINCHE_STORAGE_URL"] = host.BaseUrl + "/files/v1";
             using var process = System.Diagnostics.Process.Start(psi) ?? throw new CliException($"Couldn't run: {command}");
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct, host.Stopping);
             try
