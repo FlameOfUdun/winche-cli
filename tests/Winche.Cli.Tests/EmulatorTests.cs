@@ -124,7 +124,12 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         // Emails aren't sent: their links are printed, and work.
         var printed = System.Text.RegularExpressions.Regex.Match(log.ToString(), @"✉ verifyEmail\s+to ann@example.com.*\n\s+(http\S+)");
         Assert.True(printed.Success, log.ToString());
-        var page = await new HttpClient().GetStringAsync(printed.Groups[1].Value);
+        // The link carries its code after '#'; the page a browser opens posts it to show the button.
+        var link = new Uri(printed.Groups[1].Value);
+        var code = System.Web.HttpUtility.ParseQueryString(link.Fragment.TrimStart('#'))["code"]!;
+        using var http = new HttpClient();
+        var page = await (await http.PostAsync(new Uri(link, link.AbsolutePath), new FormUrlEncodedContent(new Dictionary<string, string> { ["open"] = "1", ["code"] = code })))
+            .Content.ReadAsStringAsync();
         Assert.Contains("Verify my email", page);
     }
 
