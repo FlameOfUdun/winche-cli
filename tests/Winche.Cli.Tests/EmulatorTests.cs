@@ -143,7 +143,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
 
         var upload = await (await u1.PostAsync(path + ":upload", null)).Content.ReadFromJsonAsync<JsonObject>();
         var uploadUrl = upload!["url"]!.GetValue<string>();
-        Assert.StartsWith(host.BaseUrl + "/_files/o/uploads/u1/notes/a.txt?exp=", uploadUrl);   // signed
+        Assert.Matches($"^{System.Text.RegularExpressions.Regex.Escape(host.BaseUrl)}/_files/o/uploads/u1/notes/[0-9a-f]{{16}}/a.txt\\?exp=", uploadUrl);   // signed, to the upload's own key
         using (var raw = new HttpClient())
             Assert.Equal(HttpStatusCode.OK, (await raw.PutAsync(uploadUrl, new StringContent("hello"))).StatusCode);
 
@@ -151,7 +151,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         var download = await (await u1.PostAsync(path + ":download", null)).Content.ReadFromJsonAsync<JsonObject>();
         using (var raw = new HttpClient())
             Assert.Equal("hello", await raw.GetStringAsync(download!["url"]!.GetValue<string>()));
-        Assert.True(System.IO.File.Exists(Path.Combine(_dir, "data", "storage", "objects", "uploads", "u1", "notes", "a.txt")));
+        Assert.Single(Directory.GetFiles(Path.Combine(_dir, "data", "storage", "objects", "uploads", "u1", "notes"), "a.txt", SearchOption.AllDirectories));
     }
 
     [Fact]
