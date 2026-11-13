@@ -199,8 +199,7 @@ internal sealed class KeycloakLogin(CliEnvironment env, HttpClient http)
         ctx.Response.Close();
     }
 
-    private static string Base64Url(byte[] bytes) =>
-        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    private static string Base64Url(byte[] bytes) => WincheBase64Url.Encode(bytes);
 }
 
 internal static class Jwt
@@ -212,9 +211,7 @@ internal static class Jwt
         if (parts.Length < 2) return null;
         try
         {
-            var payload = parts[1].Replace('-', '+').Replace('_', '/');
-            payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
-            using var doc = JsonDocument.Parse(Convert.FromBase64String(payload));
+            using var doc = JsonDocument.Parse(WincheBase64Url.DecodeBytes(parts[1]));
             return doc.RootElement.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         }
         catch (Exception ex) when (ex is FormatException or JsonException)

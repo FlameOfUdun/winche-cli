@@ -57,9 +57,7 @@ internal static class TestTokens
         if (parts.Length < 2) return null;
         try
         {
-            var json = parts[1].Replace('-', '+').Replace('_', '/');
-            json = json.PadRight(json.Length + (4 - json.Length % 4) % 4, '=');
-            using var doc = JsonDocument.Parse(System.Convert.FromBase64String(json));
+            using var doc = JsonDocument.Parse(WincheBase64Url.DecodeBytes(parts[1]));
             if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
             var claims = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var p in doc.RootElement.EnumerateObject()) claims[p.Name] = ToClaim(p.Value);
@@ -84,5 +82,5 @@ internal static class TestTokens
         _ => null,
     };
 
-    private static string B64(string s) => System.Convert.ToBase64String(Encoding.UTF8.GetBytes(s)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    private static string B64(string s) => WincheBase64Url.Encode(s);
 }

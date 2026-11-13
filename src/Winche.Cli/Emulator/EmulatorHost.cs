@@ -141,7 +141,6 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.ConnectionString = connection;
             o.Issuer = issuer;
             o.UseSettings();   // sign-in methods, lifetimes and email changeable in the console
-            o.KeyEncryptionSecret = "winche-emulator-local-only-signing-key-secret";   // local data, a fixed secret
             o.EmailPassword(p => p.MinLength = 6);
             o.Anonymous();
             o.Email(e => e.AppName = "Winche emulator");
@@ -159,7 +158,8 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.PollInterval = TimeSpan.FromSeconds(2);
         });
         builder.Services.AddAuthentication().AddWincheTokens(t => t.TrustWincheAuth().UseSettings());
-        static IReadOnlyDictionary<string, object?>? Claims(HttpContext http) => WincheClaims.From(http) ?? TestTokens.Claims(http);
+        // Who is calling, for every package: a Winche Auth token, else an unsigned test token (winche emulators token).
+        builder.Services.AddWincheCaller(async http => await WincheClaims.FromAsync(http) ?? TestTokens.Claims(http));
 
         builder.Services.AddWincheHooks(o => o.ConnectionString = connection);   // webhooks and ready-made actions
         // Functions (JS/TS on Deno), with ctx.db / ctx.files / ctx.users; callables at /functions/v1/call/{name}.
@@ -167,37 +167,32 @@ internal sealed class EmulatorHost : IAsyncDisposable
         {
             o.ConnectionString = connection;
             o.DenoPath = options.DenoPath;
-            o.Claims = Claims;
             o.SyncInterval = TimeSpan.FromSeconds(1);
         });
         Winche.Functions.Database.DatabaseFunctionsExtensions.AddWincheFunctionsForDatabase(builder.Services);
         Winche.Functions.Storage.StorageFunctionsExtensions.AddWincheFunctionsForStorage(builder.Services);
         Winche.Functions.Auth.AuthFunctionsExtensions.AddWincheFunctionsForAuth(builder.Services);
-        Winche.Webhooks.Auth.AuthHooksExtensions.AddWincheHooksForAuth(builder.Services);
         builder.Services.AddWincheDatabase(o =>
         {
             o.ConnectionString = connection;
-            o.MapClaims(Claims);
             o.UseRules(databaseRules);
             o.KeepHistory(TimeSpan.FromDays(7));   // the console's History tab
             o.LogRequests(r => r.SuccessSampleRate = 1.0);   // the Logs Explorer: every request, not a sample
             o.UseSettings();   // Database → Settings: indexes, expiry, limits
-            o.UseHooks(h => Winche.Webhooks.Database.DatabaseHooksExtensions.AddWincheHooks(h));   // the Hooks page
+            o.UseHooks(h => h.PublishChanges());   // document changes for hooks and functions
         }).AddWincheDatabaseWsApi(ws => ws.UseSettings());
         builder.Services.AddWincheStorage(o =>
         {
             o.ConnectionString = connection;
-            o.MapClaims(Claims);
             o.UseRules(storageRules);
             o.LogRequests(r => r.SuccessSampleRate = 1.0);
             o.UseSettings();   // Storage → Settings: size limit, clean-up, moving files
             o.AllowS3Locations();   // … to an S3 or S3-compatible bucket
-            o.UseHooks(h => Winche.Webhooks.Storage.StorageHooksExtensions.AddWincheHooks(h));
+            o.UseHooks(h => h.PublishChanges());
             // Files in the data folder, through signed URLs on the emulator itself — the same package apps use.
             o.UseFileSystemArchive(fs =>
             {
                 fs.Root = Path.Combine(data, "storage");
-                fs.SigningKey = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
             });
         });
         builder.Services.AddWincheConsole(o =>
@@ -225,6 +220,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         if (!options.Quiet) app.Use(RequestLog(output));
         app.UseWebSockets();
         app.UseWincheWsQueryToken();
+        app.UseWincheCaller();
         await app.InitializeWincheDatabaseAsync();
         app.MapWincheDatabaseWsApi();
         app.MapWincheDatabaseRestApi();
@@ -402,7 +398,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         var path = ctx.Request.Path.Value ?? "";
         if (!(path.StartsWith("/documents", StringComparison.Ordinal) || path.StartsWith("/files", StringComparison.Ordinal))) return;
         var status = ctx.Response.StatusCode;
-        var who = TestTokens.Claims(ctx)?.GetValueOrDefault("uid") is { } uid ? $" as {uid}" : " signed out";
+        var who = WincheCaller.UidOf(await ctx.WincheCallerOf()) is { } uid ? $" as {uid}" : " signed out";
         var shown = Readable(path, "/documents/v1/") ?? Readable(path, "/files/v1/") ?? path;
         var note = status == 403 ? "  ← denied by the rules" : "";
         output.WriteLine($"{DateTime.Now:HH:mm:ss} {ctx.Request.Method,-6} {shown}{who} → {status}{note}");
@@ -422,9 +418,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
     {
         try
         {
-            var s = b64.Replace('-', '+').Replace('_', '/');
-            s = s.PadRight(s.Length + (4 - s.Length % 4) % 4, '=');
-            var text = Encoding.UTF8.GetString(Convert.FromBase64String(s));
+            var text = WincheBase64Url.Decode(b64);
             return text.Length > 0 && text.All(c => !char.IsControl(c) && c != '\uFFFD') ? text : null;
         }
         catch (FormatException)
