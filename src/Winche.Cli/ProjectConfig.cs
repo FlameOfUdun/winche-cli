@@ -112,7 +112,7 @@ internal sealed record ConsoleTarget(Uri Url, string? Alias)
             if (projects.TryGetValue(projectArg, out var url)) return new(Parse(url), projectArg);
             // Without aliases: a project id on the same Winche Server as the console otherwise used (/p/<id>/…). With
             // aliases, an unknown name is a typo, not a project to go looking for.
-            if (projects.Count == 0 && Resolve(config, null, null, env) is { } server && Winche.Console.Project.ProjectSetup.IsValidId(projectArg))
+            if (projects.Count == 0 && Resolve(config, null, null, env) is { } server && WincheIds.IsValid(projectArg))
                 return new(ForProject(server.Url, projectArg), projectArg);
             throw new CliException(projects.Count == 0
                 ? $"--project {projectArg}: no console to find it on. Pass --console <url>, or add one: winche use --add {projectArg} <console url>"

@@ -10,7 +10,6 @@ using Testcontainers.PostgreSql;
 using Winche.Auth.AspNetCore;
 using Winche.Auth.DependencyInjection;
 using Winche.Core;
-using Winche.Console;
 using Winche.Database.AspNetCore.DependencyInjection;
 using Winche.Database.AspNetCore.Rest.DependencyInjection;
 using Winche.Database.AspNetCore.WebSockets.DependencyInjection;
@@ -51,15 +50,12 @@ internal sealed record EmulatorOptions
 }
 
 /// <summary>
-/// <c>winche emulators</c>: Winche.Database (REST and live WebSocket), Winche.Storage and the console in one local
+/// <c>winche emulators</c>: Winche.Database (REST and live WebSocket), Winche.Storage, Auth and Functions in one local
 /// process, on a temporary Postgres, with the rules files applied and reloaded when they change, and sign-in by
 /// unsigned test tokens (<see cref="TestTokens"/>).
 /// </summary>
 internal sealed class EmulatorHost : IAsyncDisposable
 {
-    public const string ConsoleEmail = "admin@winche.local";
-    public const string ConsolePassword = "Winche-emulator1";
-
     private readonly WebApplication _app;
     private readonly PostgreSqlContainer? _postgres;
     private readonly string? _tempData;
@@ -195,24 +191,6 @@ internal sealed class EmulatorHost : IAsyncDisposable
                 fs.Root = Path.Combine(data, "storage");
             });
         });
-        builder.Services.AddWincheConsole(o =>
-        {
-            o.ConnectionString = connection;
-            o.SeedAdminEmail = ConsoleEmail;
-            o.SeedAdminPassword = ConsolePassword;
-            o.AddDatabaseTab(b => { b.UseLogs(); b.UseHistory(); });
-            o.AddStorageTab(b => b.UseLogs());
-            o.AddAuthenticationTab();
-            o.RequireTwoFactorForSettings = false;   // a local, seeded admin: no authenticator to enrol
-            o.ProjectId = options.ProjectId;
-            o.AddLogsTab(l =>
-            {
-                l.MinimumLevel = LogLevel.Information;   // locally, see what the servers say…
-                l.SetLevel("Microsoft", LogLevel.Warning);   // …but not the framework's chatter (every SQL command)
-                l.SetLevel("System", LogLevel.Warning);
-                l.FlushInterval = TimeSpan.FromMilliseconds(500);
-            });
-        });
         builder.Services.AddCors(c => c.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
         var app = builder.Build();
@@ -229,8 +207,13 @@ internal sealed class EmulatorHost : IAsyncDisposable
         app.MapWincheStorageFileSystem();
         app.MapWincheAuth();
         Winche.Functions.FunctionsEndpoints.MapWincheFunctions(app);
-        app.MapWincheConsole("/_console");
-        Winche.Console.Apps.AppSetupEndpoints.MapWincheAppSetup(app);   // GET /.well-known/winche, for winche configure
+        // GET /.well-known/winche, for winche configure: every service runs here; any app id is taken as given (the
+        // emulators keep no list of apps).
+        var authOptions = app.Services.GetService<Winche.Auth.WincheAuthOptions>();
+        app.MapWincheAppSetup(http => new WincheAppSetup(options.ProjectId, null, WincheAppSetup.BaseUrlOf(http.Request),
+            [new("database", "/documents/v1", "/documents/v1/ws"), new("storage", "/files/v1"), new("auth", "/auth/v1"), new("functions", "/functions/v1")],
+            [.. (authOptions?.IdentityProviders ?? []).Select(p => new WincheAppSetupProvider(p.Name, p.Kind, p.DisplayName ?? p.Name, [.. p.Audiences]))],
+            http.Request.Query["app"].FirstOrDefault() is { Length: > 0 } appId ? new WincheAppSetupApp(appId, appId) : null));
 
         try
         {
@@ -264,7 +247,6 @@ internal sealed class EmulatorHost : IAsyncDisposable
         _out.WriteLine($"  Storage           {BaseUrl}/files/v1");
         _out.WriteLine($"  Auth              {BaseUrl}/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)");
         _out.WriteLine($"  Functions         {BaseUrl}/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)");
-        _out.WriteLine($"  Console           {BaseUrl}/_console   ({ConsoleEmail} / {ConsolePassword})");
         _out.WriteLine($"  Postgres          {(TemporaryDatabase ? "temporary (gone when the emulator stops)" : "the one you passed with --pg")}");
         _out.WriteLine();
         _out.WriteLine("  Sign in as anyone with an unsigned token:");

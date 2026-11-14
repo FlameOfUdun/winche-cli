@@ -352,7 +352,7 @@ internal static class CliApp
             if (parsed["indexes"] is null) return text;
             var indexes = System.Text.Json.JsonSerializer.Deserialize<List<Winche.Database.Settings.IndexSettings>>(parsed["indexes"]!.ToJsonString(), Web)!;
             var ttl = System.Text.Json.JsonSerializer.Deserialize<List<Winche.Database.Settings.TtlSettings>>(parsed["ttl"]!.ToJsonString(), Web)!;
-            return Winche.Console.Indexes.IndexText.Format(indexes, ttl);
+            return Winche.Database.Settings.IndexText.Format(indexes, ttl);
         }
 
         private static readonly System.Text.Json.JsonSerializerOptions Web = new(System.Text.Json.JsonSerializerDefaults.Web);
@@ -422,13 +422,13 @@ internal static class CliApp
             // --project <id>: that project on a Winche Server with several (/p/<id>).
             if (args.Value("project") is { } projectId && args.Value("url") is not null)
             {
-                if (!Winche.Console.Project.ProjectSetup.IsValidId(projectId)) throw new CliException($"--project {projectId} isn't a project id.", 2);
+                if (!WincheIds.IsValid(projectId)) throw new CliException($"--project {projectId} isn't a project id.", 2);
                 url = $"{url}/p/{projectId}";
             }
             if (!Uri.TryCreate(url, UriKind.Absolute, out var server) || server.Scheme is not ("http" or "https"))
                 throw new CliException($"{url} isn't an address. Pass --url https://api.example.com", 2);
 
-            Winche.Console.Apps.AppSetup setup;
+            WincheAppSetup setup;
             try
             {
                 var appId = args.Value("app");
@@ -441,7 +441,7 @@ internal static class CliApp
                     throw new CliException($"{url} doesn't publish its setup (/.well-known/winche). Is it a Winche Server or the emulators, up to date?");
                 }
                 response.EnsureSuccessStatusCode();
-                setup = await System.Net.Http.Json.HttpContentJsonExtensions.ReadFromJsonAsync<Winche.Console.Apps.AppSetup>(
+                setup = await System.Net.Http.Json.HttpContentJsonExtensions.ReadFromJsonAsync<WincheAppSetup>(
                     response.Content, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web), ct)
                     ?? throw new CliException($"{url} sent an empty setup.");
             }
@@ -454,11 +454,11 @@ internal static class CliApp
 
             var platforms = args.Value("platforms") is { } list
                 ? list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                : Winche.Console.Apps.AppSetup.AllPlatforms.Where(p => Directory.Exists(Path.Combine(env.WorkingDirectory, p))).ToArray();
-            var unknown = platforms.Where(p => !Winche.Console.Apps.AppSetup.AllPlatforms.Contains(p.ToLowerInvariant())).ToList();
+                : WincheAppSetup.AllPlatforms.Where(p => Directory.Exists(Path.Combine(env.WorkingDirectory, p))).ToArray();
+            var unknown = platforms.Where(p => !WincheAppSetup.AllPlatforms.Contains(p.ToLowerInvariant())).ToList();
             if (unknown.Count > 0)
-                throw new CliException($"Unknown platform {string.Join(", ", unknown)}: use {string.Join(", ", Winche.Console.Apps.AppSetup.AllPlatforms)}.", 2);
-            if (platforms.Length == 0) platforms = [.. Winche.Console.Apps.AppSetup.AllPlatforms];
+                throw new CliException($"Unknown platform {string.Join(", ", unknown)}: use {string.Join(", ", WincheAppSetup.AllPlatforms)}.", 2);
+            if (platforms.Length == 0) platforms = [.. WincheAppSetup.AllPlatforms];
 
             var target = Path.GetFullPath(args.Value("out") ?? Path.Combine("lib", "winche_options.dart"), env.WorkingDirectory);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);

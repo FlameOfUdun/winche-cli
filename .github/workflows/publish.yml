@@ -21,11 +21,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # The CLI alone: its tests need a winche-server checkout next to this repository (the console's API).
       - name: Restore
-        run: dotnet restore Winche.Cli.slnx
+        run: dotnet restore src/Winche.Cli/Winche.Cli.csproj
 
       - name: Build
-        run: dotnet build Winche.Cli.slnx -c Release --no-restore
+        run: dotnet build src/Winche.Cli/Winche.Cli.csproj -c Release --no-restore
 
       - name: Pack
         run: dotnet pack src/Winche.Cli/Winche.Cli.csproj -c Release --no-build -o ./packages

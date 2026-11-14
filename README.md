@@ -30,7 +30,7 @@ winche rules rollback 3 --only database                  # make version 3 active
 winche rules pull                                        # write the live rules into the files
 winche functions init                                    # a functions/ folder: index.ts, deno.json, types for VS Code
 winche functions deploy -m "what changed"                # deploy it through the console, as you (or a CI token)
-winche emulators start                                   # database, storage and console locally
+winche emulators start                                   # database, storage, auth and functions locally
 winche emulators exec "npm test"                         # …around a command (CI)
 winche emulators token u1 role=admin                     # a sign-in token the emulators accept
 winche configure --url https://api.example.com          # lib/winche_options.dart for a Flutter/Dart app
@@ -217,16 +217,18 @@ pick one with `--only`.
 
 ## Emulators
 
-`winche emulators start` runs Winche.Database (REST and the live WebSocket), Winche.Storage and the console in one
-local process — like Firebase's emulators:
+`winche emulators start` runs Winche.Database (REST and the live WebSocket), Winche.Storage, Winche Auth and functions in
+one local process, for your app to talk to — like Firebase's emulators. There's no console in it: the console is part
+of Winche Server.
 
 ```text
 Winche emulator is running — rules from database.rules, storage.rules, reloaded on save
 
-  Database (REST)   http://localhost:9090/documents
-  Database (live)   ws://localhost:9090/documents/ws
-  Storage           http://localhost:9090/files
-  Console           http://localhost:9090/_console   (admin@winche.local / Winche-emulator1)
+  Database (REST)   http://localhost:9090/documents/v1
+  Database (live)   ws://localhost:9090/documents/v1/ws
+  Storage           http://localhost:9090/files/v1
+  Auth              http://localhost:9090/auth/v1
+  Functions         http://localhost:9090/functions/v1/call/<name>
   Postgres          temporary (gone when the emulator stops)
 
 14:02:11 PUT    /documents/v1/users/u1 as u1 → 200
@@ -245,7 +247,7 @@ Winche emulator is running — rules from database.rules, storage.rules, reloade
 - **Each request** is printed with who made it and the result; `--quiet` turns that off, `--verbose` adds the
   servers' own logs.
 - **The console** has the Logs tab, the Database / Storage Logs sub-tabs (Information and up) and the Database History sub-tab (who changed what); every request is logged to the Logs Explorer.
-- **Auth:** Winche Auth runs too — sign up, sign in and guests at `/auth/v1` (passwords of 6+ characters), users in the console's Authentication tab. Hand-made tokens from `winche emulators token <uid>` keep working beside real ones. Emails (verify, reset, email change) aren't sent: their links are printed in the emulator's output. Google and Apple sign-in take fake ID tokens: `winche emulators idtoken google ann@example.com`.
+- **Auth:** Winche Auth runs too — sign up, sign in and guests at `/auth/v1` (passwords of 6+ characters), Hand-made tokens from `winche emulators token <uid>` keep working beside real ones. Emails (verify, reset, email change) aren't sent: their links are printed in the emulator's output. Google and Apple sign-in take fake ID tokens: `winche emulators idtoken google ann@example.com`.
 - `--port` (default 9090) and `--host` (default `localhost`; `0.0.0.0` to reach it from a phone or another machine).
 
 `winche emulators exec "<command>"` starts the emulators, runs the command with `WINCHE_EMULATOR`,
@@ -278,7 +280,8 @@ dotnet build Winche.Cli.slnx
 dotnet test Winche.Cli.slnx      # needs Docker (Testcontainers Postgres)
 ```
 
-The tests run the CLI in-process against `tests/Winche.Cli.TestHost`, an app with the console in Keycloak mode,
+The tests need a [winche-server](https://github.com/FlameOfUdun/winche-server) checkout next to this repository: they run
+the CLI in-process against `tests/Winche.Cli.TestHost`, which hosts the console's API from there in Keycloak mode,
 including a full browser sign-in against a fake Keycloak.
 
 Releases: push a `v*` tag; GitHub Actions packs and publishes to NuGet.

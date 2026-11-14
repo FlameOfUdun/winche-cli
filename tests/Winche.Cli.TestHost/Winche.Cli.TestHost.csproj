@@ -6,8 +6,9 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <!-- A host app as the CLI meets it: Winche.Database + Winche.Storage + the console with both rules editors. -->
-    <PackageReference Include="Winche.Console" Version="4.1.0" />
+    <!-- A server as the CLI meets it: the console's API (part of Winche Server: a winche-server checkout next to this
+         repository) with both rules editors, over Winche.Database and Winche.Storage. -->
+    <ProjectReference Include="..\..\..\winche-server\src\Winche.Console\Winche.Console.csproj" />
     <PackageReference Include="Winche.Database" Version="11.1.0" />
     <PackageReference Include="Winche.Storage" Version="9.1.0" />
   </ItemGroup>

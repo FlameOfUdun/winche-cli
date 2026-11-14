@@ -160,17 +160,6 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
     }
 
     [Fact]
-    public async Task The_console_is_served_and_its_admin_can_sign_in()
-    {
-        await using var host = await Start(TextWriter.Null);
-        using var client = new HttpClient(new HttpClientHandler { UseCookies = true }) { BaseAddress = new Uri(host.BaseUrl) };
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/_console/")).StatusCode);
-        var login = await client.PostAsJsonAsync("/_console/api/auth/login",
-            new { email = EmulatorHost.ConsoleEmail, password = EmulatorHost.ConsolePassword });
-        Assert.True(login.IsSuccessStatusCode, await login.Content.ReadAsStringAsync());
-    }
-
-    [Fact]
     public async Task Exec_runs_a_command_against_the_emulators_and_returns_its_exit_code()
     {
         File("winche.json", """{ "rules": { "database": "database.rules" } }""");
@@ -218,16 +207,15 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         Assert.Contains("No app id: register the app in the console", dart);
         Assert.Contains("app:       none", stdout.ToString());
 
-        // An app id the server doesn't know (the emulators register none) is refused with what to do.
-        var errors = new StringWriter();
-        var unknownApp = await CliApp.RunAsync(["configure", "--url", host.BaseUrl, "--app", "app-nope"],
+        // The emulators keep no list of apps: an app id is written as given.
+        var withApp = await CliApp.RunAsync(["configure", "--url", host.BaseUrl, "--app", "clinic-ios"],
             new CliEnvironment
             {
-                Out = stdout, Error = errors, WorkingDirectory = _dir, ConfigDirectory = _dir,
+                Out = stdout, Error = stderr, WorkingDirectory = _dir, ConfigDirectory = _dir,
                 GetVariable = _ => null, Http = new HttpClientHandler(), OpenBrowser = _ => { },
             });
-        Assert.Equal(2, unknownApp);
-        Assert.Contains("No app app-nope is registered", errors.ToString());
+        Assert.Equal(0, withApp);
+        Assert.Contains("appId: 'clinic-ios',", System.IO.File.ReadAllText(Path.Combine(_dir, "lib", "winche_options.dart")));
 
         var unreachable = await CliApp.RunAsync(["configure", "--url", "http://127.0.0.1:1"],
             new CliEnvironment
