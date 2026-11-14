@@ -60,6 +60,7 @@ internal static class CliApp
           --verbose            Emulators: show the servers' own logs
           --out <file>         configure: where to write (default lib/winche_options.dart)
           --platforms <list>   configure: android,ios,macos,web,windows,linux (default: the app's platform folders)
+          --app <id>           configure: the app's id, from the console's Project settings → Your apps
           -h, --help           Show this help
           --version            Show the version
         """;
@@ -314,9 +315,15 @@ internal static class CliApp
             Winche.Console.Apps.AppSetup setup;
             try
             {
-                using var response = await http.GetAsync(new Uri(server, "/.well-known/winche"), ct);
+                var appId = args.Value("app");
+                using var response = await http.GetAsync(new Uri(server, "/.well-known/winche" + (appId is null ? "" : $"?app={Uri.EscapeDataString(appId)}")), ct);
                 if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    var body = await response.Content.ReadAsStringAsync(ct);
+                    if (appId is not null && body.Contains("\"error\"", StringComparison.Ordinal))
+                        throw new CliException($"No app {appId} is registered there. Register it in the console (Project settings → Your apps) and copy its id.", 2);
                     throw new CliException($"{url} doesn't publish its setup (/.well-known/winche). Is it a Winche Server or the emulators, up to date?");
+                }
                 response.EnsureSuccessStatusCode();
                 setup = await System.Net.Http.Json.HttpContentJsonExtensions.ReadFromJsonAsync<Winche.Console.Apps.AppSetup>(
                     response.Content, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web), ct)
@@ -342,6 +349,9 @@ internal static class CliApp
             await File.WriteAllTextAsync(target, setup.DartOptionsFile(platforms), ct);
 
             env.Out.WriteLine($"Wrote {Path.GetRelativePath(env.WorkingDirectory, target)} for project {setup.ProjectId} at {setup.BaseUrl}");
+            env.Out.WriteLine(setup.App is { } registered
+                ? $"  app:       {registered.Name} ({registered.Id})"
+                : "  app:       none (register the app in the console, then run this again with --app <its id>)");
             env.Out.WriteLine($"  platforms: {string.Join(", ", platforms)}");
             env.Out.WriteLine($"  services:  {(setup.Services.Count == 0 ? "none" : string.Join(", ", setup.Services.Select(s => s.Id)))}");
             if (setup.Providers.Where(p => p.ClientIds.Count > 1).Select(p => p.Name).ToList() is { Count: > 0 } several)
@@ -860,7 +870,7 @@ internal static class CliApp
 internal sealed class Args
 {
     private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose"];
-    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms"];
+    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project" };
 
     public List<string> Positional { get; } = [];

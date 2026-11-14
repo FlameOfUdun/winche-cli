@@ -215,6 +215,19 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         Assert.Contains("projectId: 'clinic',", dart);
         Assert.Contains($"baseUrl: Uri.parse('{host.BaseUrl.TrimEnd('/')}'),", dart);
         Assert.Contains("services:  database, storage, auth, functions", stdout.ToString());
+        Assert.Contains("No app id: register the app in the console", dart);
+        Assert.Contains("app:       none", stdout.ToString());
+
+        // An app id the server doesn't know (the emulators register none) is refused with what to do.
+        var errors = new StringWriter();
+        var unknownApp = await CliApp.RunAsync(["configure", "--url", host.BaseUrl, "--app", "app-nope"],
+            new CliEnvironment
+            {
+                Out = stdout, Error = errors, WorkingDirectory = _dir, ConfigDirectory = _dir,
+                GetVariable = _ => null, Http = new HttpClientHandler(), OpenBrowser = _ => { },
+            });
+        Assert.Equal(2, unknownApp);
+        Assert.Contains("No app app-nope is registered", errors.ToString());
 
         var unreachable = await CliApp.RunAsync(["configure", "--url", "http://127.0.0.1:1"],
             new CliEnvironment

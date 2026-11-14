@@ -47,19 +47,21 @@ Run `winche --help` for the full list.
 Like `flutterfire configure`: in your Flutter app's folder,
 
 ```sh
-winche configure --url https://api.example.com     # or no --url: the emulators on localhost:9090
+winche configure --url https://api.example.com --app app-xxxxxxxxxxxx   # or no --url: the emulators on localhost:9090
 ```
 
 reads the server's public setup (`/.well-known/winche`: which services it runs and where, and the sign-in providers'
 client ids) and writes `lib/winche_options.dart`, with a `DefaultWincheOptions` for each platform folder the app has
-(`--platforms android,ios,web` to choose, `--out` to write elsewhere). Then:
+(`--platforms android,ios,web` to choose, `--out` to write elsewhere). `--app` is the app's id from the console
+(Project settings → Your apps): it goes in the file as `appId`, the SDK sends it with every request, and the console
+counts each app's requests (and can refuse apps that aren't registered). Then:
 
 ```dart
 final app = await WincheFlutter.initializeApp(options: DefaultWincheOptions.currentPlatform);
 if (kDebugMode) app.useEmulator();   // winche emulators start
 ```
 
-The console's **Apps** page shows the same file, to download. The emulators' project id is `projectId` in
+The console's Project settings → Your apps shows the same file, to download. The emulators' project id is `projectId` in
 `winche.json` (default `demo`).
 
 ## `winche.json`
