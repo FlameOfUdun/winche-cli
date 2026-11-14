@@ -83,7 +83,7 @@ internal sealed class ProjectConfig
 
     public string? FunctionsPath => Functions is { } f ? Path.GetFullPath(f, Directory) : null;
 
-    public string IndexesPath => Path.GetFullPath(Indexes ?? "database.indexes", Directory);
+    [JsonIgnore] public string IndexesPath => Path.GetFullPath(Indexes ?? "database.indexes", Directory);
 
     public string? TestsPath(string subsystem) =>
         Tests?.GetValueOrDefault(subsystem) is { } file ? Path.GetFullPath(file, Directory) : null;
