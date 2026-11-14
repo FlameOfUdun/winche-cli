@@ -43,7 +43,7 @@ internal static class CliApp
         Options:
           --console <url>      Console URL, e.g. https://api.example.com/_console (or WINCHE_CONSOLE, or winche.json)
           -P, --project <name> A project from winche.json's "projects" (instead of the one picked with winche use)
-          --token <token>      A CI token from the console (Access → CI tokens) instead of a saved sign-in (or WINCHE_TOKEN)
+          --token <token>      A CI token from the console (Project settings → CLI and CI) instead of a saved sign-in (or WINCHE_TOKEN)
           --config <path>      winche.json to use (default: the nearest one upward)
           --only <list>        database, storage, or database,storage (default: every file in winche.json)
           -m, --message <text> Note for the deployed versions (deploy)

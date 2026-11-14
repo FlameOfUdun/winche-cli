@@ -175,11 +175,11 @@ pick one with `--only`.
 
 - **A console with its own accounts:** the console asks you (signed in there) to allow the CLI. It then acts as you,
   with your role as it is at each request, for 90 days. `winche logout` ends it; admins see and can end everyone's
-  under **Access → CI tokens**.
+  under **Project settings → CLI and CI**.
 - **A Keycloak console:** you sign in with the console's Keycloak client; its tokens are refreshed as needed.
   Register the redirect URI on that client.
 - Deploying needs the console's **Admin** role (and two-step sign-in, where the console requires it for settings).
-- **CI:** an admin makes a **CI token** under **Access → CI tokens**: named (e.g. `gitlab-main`), limited to deploying
+- **CI:** an admin makes a **CI token** under **Project settings → CLI and CI**: named (e.g. `gitlab-main`), limited to deploying
   functions and/or rules, expiring (30 days to 2 years), revocable. Set `WINCHE_TOKEN` to it (and the console with
   `--console` or `WINCHE_CONSOLE`): `winche functions deploy` and `winche rules deploy` then run as that token, named
   in the version history ("gitlab-main (CI token by ann@example.com)"). It stops working if its maker is no longer an
