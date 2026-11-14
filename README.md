@@ -107,6 +107,28 @@ them with `winche use --add <alias> https://api.example.com/p/<id>/_console`; wi
 `--project <id>` reaches a project on the same server directly. Each project's console has its own sign-in for the
 CLI (`winche login --project <id>`). For an app, `winche configure --url https://api.example.com --project <id>`.
 
+## Indexes and expiry
+
+The database's indexes and expiry rules, as a file like the rules (`database.indexes`, or `"indexes"` in `winche.json`):
+
+```
+// Sessions by user, newest first; gone once they expire.
+collection sessions {
+  index (userId, startedAt desc)
+  expire when expiresAt
+}
+
+// Every "notes" collection, wherever it is.
+collection group notes {
+  index (tags contains)
+}
+```
+
+`winche indexes pull` writes the console's to the file, `winche indexes diff` shows what deploying it would change, and
+`winche indexes deploy -m "why"` checks it on the console and saves it there (the note goes in the history). Indexes
+no longer listed are dropped; they build in the background. The console's Database → Settings → Indexes and expiry
+edits the same text. CI tokens need the `indexes` scope.
+
 ## Testing rules
 
 `winche rules test` runs checks against the local rules files, offline, so CI can catch a rule mistake before

@@ -127,9 +127,16 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
     /// POSTs <paramref name="body"/> to <paramref name="path"/>; the answer, and whether it succeeded. Sign-in, role and
     /// reachability problems throw; anything else the console refused comes back for the caller to show.
     /// </summary>
-    public async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PostAsync(string path, object body, string what, CancellationToken ct)
+    public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PostAsync(string path, object body, string what, CancellationToken ct) =>
+        SendJsonAsync(HttpMethod.Post, path, body, what, ct);
+
+    /// <summary>PUTs <paramref name="body"/>, like <see cref="PostAsync"/>.</summary>
+    public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PutAsync(string path, object body, string what, CancellationToken ct) =>
+        SendJsonAsync(HttpMethod.Put, path, body, what, ct);
+
+    private async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> SendJsonAsync(HttpMethod method, string path, object body, string what, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(console, path)) { Content = JsonContent.Create(body) };
+        using var request = new HttpRequestMessage(method, new Uri(console, path)) { Content = JsonContent.Create(body) };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         HttpResponseMessage response;
         try { response = await http.SendAsync(request, ct); }

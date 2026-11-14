@@ -66,6 +66,37 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
         """;
 
     [Fact]
+    public async Task Indexes_are_pulled_diffed_and_deployed_as_a_file()
+    {
+        Write("winche.json", $$"""{ "console": "{{ConsoleUrl}}", "rules": {} }""");
+        var pulled = await Admin("indexes", "pull");
+        Assert.True(pulled.Exit == 0, pulled.Out + pulled.Err);
+        Write("database.indexes", """
+            // Sessions by user, newest first; gone once they expire.
+            collection sessions {
+              index (userId, startedAt desc)
+              expire when expiresAt
+            }
+            """);
+        var diff = await Admin("indexes", "diff");
+        Assert.Contains("+ collection sessions {", diff.Out);
+        var deploy = await Admin("indexes", "deploy", "-m", "Sessions by user");
+        Assert.True(deploy.Exit == 0, deploy.Out + deploy.Err);
+        Assert.Contains("deployed as version", deploy.Out);
+        Assert.Contains("no changes", (await Admin("indexes", "diff")).Out);   // comments aside, the same
+        Assert.Contains("no changes", (await Admin("indexes", "deploy")).Out);
+
+        Write("database.indexes", "collection sessions {\n  index (userId startedAt)\n}\n");
+        var bad = await Admin("indexes", "deploy");
+        Assert.NotEqual(0, bad.Exit);
+        Assert.Contains("database.indexes:2:", bad.Err);
+
+        File.Delete(Path.Combine(_dir, "database.indexes"));
+        Assert.Equal(0, (await Admin("indexes", "pull")).Exit);
+        Assert.Contains("expire when expiresAt", File.ReadAllText(Path.Combine(_dir, "database.indexes")));
+    }
+
+    [Fact]
     public async Task Init_then_validate_offline()
     {
         var init = await Run(null, null, null, "init", "--console", ConsoleUrl);

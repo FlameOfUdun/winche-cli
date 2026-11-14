@@ -9,7 +9,9 @@ var builder = WebApplication.CreateBuilder(args);
 var wincheConn = builder.Configuration["Winche:ConnectionString"]
     ?? throw new InvalidOperationException("Winche:ConnectionString is required.");
 
-builder.Services.AddWincheDatabase(cfg => cfg.ConnectionString = wincheConn);
+// Settings the console saves (the database's indexes and expiry among them).
+Winche.Core.ServiceCollectionExtensions.AddWincheConfig(builder.Services, o => { o.ConnectionString = wincheConn; o.MasterKey = "cli-test-host-master-key-0123456789abcdef"; });
+builder.Services.AddWincheDatabase(cfg => { cfg.ConnectionString = wincheConn; cfg.UseSettings(); });
 builder.Services.AddWincheStorage(opts => opts.ConnectionString = wincheConn);
 builder.Services.AddSingleton<IArchive, NoOpArchive>();
 

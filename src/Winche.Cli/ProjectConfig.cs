@@ -24,6 +24,8 @@ internal sealed class ProjectConfig
     [JsonPropertyName("projects")] public Dictionary<string, string>? Projects { get; set; }
     [JsonPropertyName("rules")] public Dictionary<string, string> Rules { get; set; } = new(StringComparer.Ordinal);
     [JsonPropertyName("tests")] public Dictionary<string, string>? Tests { get; set; }
+    /// <summary>The database's indexes and expiry file (winche indexes deploy|diff|pull; default "database.indexes").</summary>
+    [JsonPropertyName("indexes")] public string? Indexes { get; set; }
     /// <summary>The project's id, for apps' winche_options.dart (the emulator's /.well-known/winche; default "demo").</summary>
     [JsonPropertyName("projectId")] public string? ProjectId { get; set; }
     /// <summary>The functions folder (winche functions init writes "functions").</summary>
@@ -80,6 +82,8 @@ internal sealed class ProjectConfig
     public string RulesPath(string subsystem) => Path.GetFullPath(Rules[subsystem], Directory);
 
     public string? FunctionsPath => Functions is { } f ? Path.GetFullPath(f, Directory) : null;
+
+    public string IndexesPath => Path.GetFullPath(Indexes ?? "database.indexes", Directory);
 
     public string? TestsPath(string subsystem) =>
         Tests?.GetValueOrDefault(subsystem) is { } file ? Path.GetFullPath(file, Directory) : null;

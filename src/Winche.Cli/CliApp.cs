@@ -27,6 +27,9 @@ internal static class CliApp
           rules diff           Show how the rules files differ from what the console enforces
           rules pull           Write the console's live rules into the rules files
           projects             The projects on the console's Winche Server that you can use
+          indexes deploy       Save database.indexes (indexes and expiry) on the console (-m: the note in the history)
+          indexes diff         What deploying it would change
+          indexes pull         Write the console's indexes and expiry to database.indexes (--stdout to print)
           configure            Write lib/winche_options.dart for a Flutter or Dart app, from a Winche server
                                (--url; default the emulators), like flutterfire configure
           functions init [<dir>]
@@ -85,7 +88,7 @@ internal static class CliApp
             }
 
             using var http = new HttpClient(env.Http, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(60) };
-            var command = string.Join(' ', a.Positional.Take(a.Positional[0] is "rules" or "emulators" or "functions" ? 2 : 1));
+            var command = string.Join(' ', a.Positional.Take(a.Positional[0] is "rules" or "emulators" or "functions" or "indexes" ? 2 : 1));
             var run = new Run(env, a, http);
             return command switch
             {
@@ -102,6 +105,9 @@ internal static class CliApp
                 "rules pull" => await run.PullAsync(ct),
                 "configure" => await run.ConfigureAsync(ct),
                 "projects" => await run.ProjectsAsync(ct),
+                "indexes deploy" => await run.IndexesDeployAsync(ct),
+                "indexes diff" => await run.IndexesDiffAsync(ct),
+                "indexes pull" => await run.IndexesPullAsync(ct),
                 "functions init" => run.FunctionsInit(a.Positional.ElementAtOrDefault(2)),
                 "functions deploy" => await run.FunctionsDeployAsync(a.Positional.ElementAtOrDefault(2), ct),
                 "emulators start" => await run.EmulatorsAsync(null, ct),
@@ -300,6 +306,79 @@ internal static class CliApp
                 env.Out.WriteLine($"  added \"functions\" to {Path.GetFileName(file)}");
             }
             env.Out.WriteLine("Functions are ready: edit index.ts (the Deno extension for VS Code gives types), then run: winche emulators start");
+            return 0;
+        }
+
+        // ----- indexes -----------------------------------------------------------------------------
+
+        private const string IndexesApi = "api/settings/database/indexes";
+
+        private string IndexesFile()
+        {
+            var path = RequireConfig().IndexesPath;
+            if (!File.Exists(path)) throw new CliException($"No {Path.GetRelativePath(env.WorkingDirectory, path)}. Run: winche indexes pull");
+            return path;
+        }
+
+        private async Task<string> LiveIndexesAsync(ConsoleClient client, CancellationToken ct) =>
+            (await client.GetJsonAsync(IndexesApi, ct))["text"]?.GetValue<string>() ?? "";
+
+        /// <summary>Checks the file on the console, then saves it there (the note is the reason in the history).</summary>
+        public async Task<int> IndexesDeployAsync(CancellationToken ct)
+        {
+            var path = IndexesFile();
+            var text = await File.ReadAllTextAsync(path, ct);
+            var client = await ClientAsync(ct);
+            var (_, parsed) = await client.PostAsync($"{IndexesApi}/parse", new { text }, "indexes", ct);
+            if (parsed["ok"]?.GetValue<bool>() != true && parsed["error"] is System.Text.Json.Nodes.JsonObject e)
+                throw new CliException($"{Path.GetRelativePath(env.WorkingDirectory, path)}:{e["line"]}:{e["column"]}: {e["message"]}");
+            var live = await LiveIndexesAsync(client, ct);
+            if (Normalize(live) == Normalize(await FormattedAsync(client, text, ct)))
+            {
+                env.Out.WriteLine("indexes: no changes.");
+                return 0;
+            }
+            var note = args.Value("message") ?? DefaultNote().Replace("winche rules deploy", "winche indexes deploy");
+            var (ok, saved) = await client.PutAsync(IndexesApi, new { text, reason = note }, "indexes", ct);
+            if (!ok) throw new CliException($"indexes: the console refused them: {saved["error"]?["message"] ?? saved["error"] ?? saved}");
+            env.Out.WriteLine($"indexes: deployed as version {saved["number"]} ({note}). Indexes are built in the background.");
+            return 0;
+        }
+
+        // What the console would show for this text (its own formatting), to compare without whitespace and comments.
+        private static async Task<string> FormattedAsync(ConsoleClient client, string text, CancellationToken ct)
+        {
+            var (_, parsed) = await client.PostAsync($"{IndexesApi}/parse", new { text }, "indexes", ct);
+            if (parsed["indexes"] is null) return text;
+            var indexes = System.Text.Json.JsonSerializer.Deserialize<List<Winche.Database.Settings.IndexSettings>>(parsed["indexes"]!.ToJsonString(), Web)!;
+            var ttl = System.Text.Json.JsonSerializer.Deserialize<List<Winche.Database.Settings.TtlSettings>>(parsed["ttl"]!.ToJsonString(), Web)!;
+            return Winche.Console.Indexes.IndexText.Format(indexes, ttl);
+        }
+
+        private static readonly System.Text.Json.JsonSerializerOptions Web = new(System.Text.Json.JsonSerializerDefaults.Web);
+        private static string Normalize(string text) => text.Replace("\r\n", "\n").Trim();
+
+        /// <summary>What deploying the file would change on the console.</summary>
+        public async Task<int> IndexesDiffAsync(CancellationToken ct)
+        {
+            var path = IndexesFile();
+            var client = await ClientAsync(ct);
+            var live = await LiveIndexesAsync(client, ct);
+            var mine = await FormattedAsync(client, await File.ReadAllTextAsync(path, ct), ct);
+            if (Normalize(live) == Normalize(mine)) { env.Out.WriteLine("indexes: no changes."); return 0; }
+            WriteDiff(live, mine, "console", Path.GetRelativePath(env.WorkingDirectory, path));
+            return 0;
+        }
+
+        /// <summary>Writes the console's indexes and expiry to the file (or stdout).</summary>
+        public async Task<int> IndexesPullAsync(CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var live = await LiveIndexesAsync(client, ct);
+            if (args.Flag("stdout")) { env.Out.Write(live); return 0; }
+            var path = RequireConfig().IndexesPath;
+            await File.WriteAllTextAsync(path, live, ct);
+            env.Out.WriteLine($"indexes: wrote {Path.GetRelativePath(env.WorkingDirectory, path)} (comments aren't kept on the console)");
             return 0;
         }
 
