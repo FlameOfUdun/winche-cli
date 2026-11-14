@@ -35,16 +35,14 @@ internal sealed class KeycloakLogin(CliEnvironment env, HttpClient http)
     {
         var config = await http.GetFromJsonAsync<AuthConfig>(new Uri(console, "api/auth/config"), ct)
                      ?? throw new CliException("The console sent no auth config.");
-        if (config.Provider != "keycloak" || config.Authority is null || config.ClientId is null)
-            throw new CliException(
-                "This console signs in with its own user accounts (Identity mode); the CLI needs a console in " +
-                "Keycloak mode. Pass a bearer token with --token or WINCHE_TOKEN instead.");
         return config;
     }
 
     public async Task<SavedLogin> LoginAsync(Uri console, int port, CancellationToken ct)
     {
         var config = await GetAuthConfigAsync(console, ct);
+        if (config.Provider != "keycloak" || config.Authority is null || config.ClientId is null)
+            return await new ConsoleLogin(env, http).LoginAsync(console, port, ct);   // the console's own accounts
         var discovery = await DiscoverAsync(config.Authority!, ct);
 
         var verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
@@ -91,7 +89,7 @@ internal sealed class KeycloakLogin(CliEnvironment env, HttpClient http)
     public async Task<SavedLogin?> RefreshIfNeededAsync(SavedLogin login, CancellationToken ct)
     {
         if (login.ExpiresAt > env.Time.GetUtcNow().AddMinutes(1)) return login;
-        if (login.RefreshToken is null) return null;
+        if (login.RefreshToken is null || login.Kind == SavedLogin.Console) return null;
         try
         {
             var token = await PostTokenAsync(login.TokenEndpoint, new Dictionary<string, string>
@@ -152,7 +150,7 @@ internal sealed class KeycloakLogin(CliEnvironment env, HttpClient http)
         return body;
     }
 
-    private static async Task<string> WaitForCodeAsync(HttpListener listener, string state, CancellationToken ct)
+    internal static async Task<string> WaitForCodeAsync(HttpListener listener, string state, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromMinutes(5));

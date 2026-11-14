@@ -105,6 +105,48 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         }
     }
 
+    /// <summary>
+    /// POSTs <paramref name="body"/> to <paramref name="path"/>; the answer, and whether it succeeded. Sign-in, role and
+    /// reachability problems throw; anything else the console refused comes back for the caller to show.
+    /// </summary>
+    public async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PostAsync(string path, object body, string what, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(console, path)) { Content = JsonContent.Create(body) };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        HttpResponseMessage response;
+        try { response = await http.SendAsync(request, ct); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        using (response)
+        {
+            var text = await response.Content.ReadAsStringAsync(ct);
+            var json = (text.Length > 0 ? TryNode(text) : null) ?? [];
+            switch (response.StatusCode)
+            {
+                case HttpStatusCode.Unauthorized:
+                    throw new CliException($"Not signed in to {console} (or the sign-in or token ended). Run: winche login");
+                case HttpStatusCode.Forbidden when TwoFactor(json):
+                    throw new CliException("Turn on two-step sign-in for your console account first (your account menu in the console).");
+                case HttpStatusCode.Forbidden:
+                    throw new CliException($"Your account can't deploy {what}: it needs the console's Admin role.");
+                case HttpStatusCode.NotFound:
+                    throw new CliException($"The console doesn't manage {what} (the app has no Add{Title(what)}…).");
+            }
+            return (response.IsSuccessStatusCode, json);
+        }
+    }
+
+    private static bool TwoFactor(System.Text.Json.Nodes.JsonObject json)
+    {
+        var code = json["error"] is System.Text.Json.Nodes.JsonObject e ? e["code"]?.ToString() : json["error"]?.ToString();
+        return code is "TWO_FACTOR_REQUIRED" or "two_factor_setup_required";
+    }
+
+    private static System.Text.Json.Nodes.JsonObject? TryNode(string text)
+    {
+        try { return System.Text.Json.Nodes.JsonNode.Parse(text) as System.Text.Json.Nodes.JsonObject; }
+        catch (JsonException) { return null; }
+    }
+
     private async Task<bool> HasSubsystemAsync(string subsystem, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(console, $"api/rules/{subsystem}/versions"));

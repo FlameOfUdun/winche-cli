@@ -111,21 +111,16 @@ internal static class FunctionsFolder
         return made;
     }
 
-    /// <summary>Deploys to a server with its deploy key; prints the functions or the problems.</summary>
-    public static async Task<int> DeployAsync(HttpClient http, Uri server, string key, string dir, string? note, CliEnvironment env, CancellationToken ct)
+    /// <summary>Deploys through the console (as the signed-in user or a CI token); prints the functions or the problems.</summary>
+    public static async Task<int> DeployAsync(ConsoleClient console, string dir, string? note, CliEnvironment env, CancellationToken ct)
     {
         var files = Read(dir);
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(server, "functions/v1/deploy"))
+        var (ok, body) = await console.PostAsync("api/functions/deploy",
+            new { files, note = note ?? $"Deployed from {Path.GetFileName(Path.GetFullPath(dir))}" }, "functions", ct);
+        if (!ok)
         {
-            Content = JsonContent.Create(new { files, note = note ?? $"Deployed from {Path.GetFileName(Path.GetFullPath(dir))}" }),
-        };
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key);
-        using var response = await http.SendAsync(request, ct);
-        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct) is { Length: > 0 } t ? t : "{}") as JsonObject ?? [];
-        if (!response.IsSuccessStatusCode)
-        {
-            env.Error.WriteLine($"Not deployed: {body["error"]?["message"]?.GetValue<string>() ?? response.ReasonPhrase}");
-            foreach (var p in body["error"]?["details"]?["problems"] as JsonArray ?? []) env.Error.WriteLine($"  {p}");
+            env.Error.WriteLine($"Not deployed: {body["error"]?["message"]?.GetValue<string>() ?? "the console refused it."}");
+            foreach (var p in body["error"]?["details"]?["errors"] as JsonArray ?? []) env.Error.WriteLine($"  {p}");
             return 1;
         }
         var fns = body["functions"] as JsonArray ?? [];

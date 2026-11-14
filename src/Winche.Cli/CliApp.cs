@@ -17,7 +17,7 @@ internal static class CliApp
           init                 Create winche.json and starter database.rules / storage.rules
           use [<alias>]        Pick the project (console) to use here, or list them
                                (--add <alias> <url>, --remove <alias>, --clear)
-          login                Sign in to the console in your browser (Keycloak)
+          login                Sign in to the console in your browser (its Keycloak, or its own accounts)
           logout               Forget the saved sign-in for the console
           rules validate       Check the rules files (offline)
           rules test           Run the allow/deny cases in the test files (offline)
@@ -31,7 +31,7 @@ internal static class CliApp
           functions init [<dir>]
                                Make a functions folder (default functions/): an example, deno.json, types for VS Code
           functions deploy [<dir>]
-                               Deploy the functions folder to a server (--url and --key, or WINCHE_SERVER and WINCHE_DEPLOY_KEY)
+                               Deploy the functions folder through the console, as you (winche login) or a CI token
           emulators start      Run the database, storage, functions and console locally (Postgres in Docker; rules and functions reloaded on save)
           emulators exec <cmd> Start the emulators, run <cmd> against them (e.g. your tests), stop, exit with its code
           emulators token <uid> [claim=value …]
@@ -43,7 +43,7 @@ internal static class CliApp
         Options:
           --console <url>      Console URL, e.g. https://api.example.com/_console (or WINCHE_CONSOLE, or winche.json)
           -P, --project <name> A project from winche.json's "projects" (instead of the one picked with winche use)
-          --token <jwt>        Bearer token to use instead of a saved sign-in (or WINCHE_TOKEN; for CI)
+          --token <token>      A CI token from the console (Access → CI tokens) instead of a saved sign-in (or WINCHE_TOKEN)
           --config <path>      winche.json to use (default: the nearest one upward)
           --only <list>        database, storage, or database,storage (default: every file in winche.json)
           -m, --message <text> Note for the deployed versions (deploy)
@@ -58,8 +58,6 @@ internal static class CliApp
           --data <dir>         Emulators: keep stored files here (default: a temporary folder)
           --quiet              Emulators: don't print each request
           --verbose            Emulators: show the servers' own logs
-          --url <server>       functions deploy: the Winche server, e.g. https://api.example.com
-          --key <deploy key>   functions deploy: the key from the console (Functions → VS Code)
           --out <file>         configure: where to write (default lib/winche_options.dart)
           --platforms <list>   configure: android,ios,macos,web,windows,linux (default: the app's platform folders)
           -h, --help           Show this help
@@ -91,7 +89,7 @@ internal static class CliApp
                 "init" => run.Init(),
                 "use" => run.Use(a.Positional.ElementAtOrDefault(1), a.Positional.ElementAtOrDefault(2)),
                 "login" => await run.LoginAsync(ct),
-                "logout" => run.Logout(),
+                "logout" => await run.LogoutAsync(ct),
                 "rules validate" => run.Validate(),
                 "rules test" => await run.TestAsync(ct),
                 "rules history" => await run.HistoryAsync(a.Positional.ElementAtOrDefault(2), ct),
@@ -357,12 +355,9 @@ internal static class CliApp
 
         public async Task<int> FunctionsDeployAsync(string? dir, CancellationToken ct)
         {
-            var url = args.Value("url") ?? env.GetVariable("WINCHE_SERVER")
-                ?? throw new CliException("Which server? Pass --url https://api.example.com (or set WINCHE_SERVER).", 2);
-            var key = args.Value("key") ?? env.GetVariable("WINCHE_DEPLOY_KEY")
-                ?? throw new CliException("Pass --key with the deploy key from the console (Functions → VS Code), or set WINCHE_DEPLOY_KEY.", 2);
-            if (!Uri.TryCreate(url.TrimEnd('/') + "/", UriKind.Absolute, out var server)) throw new CliException($"{url} isn't an address.", 2);
-            return await FunctionsFolder.DeployAsync(http, server, key, FunctionsDir(dir), args.Value("message"), env, ct);
+            var folder = FunctionsDir(dir);
+            var client = await ClientAsync(ct);
+            return await FunctionsFolder.DeployAsync(client, folder, args.Value("message"), env, ct);
         }
 
         public async Task<int> EmulatorsAsync(string? command, CancellationToken ct)
@@ -466,7 +461,7 @@ internal static class CliApp
             return 0;
         }
 
-        public int Logout()
+        public async Task<int> LogoutAsync(CancellationToken ct)
         {
             var console = ConsoleUrl();
             var store = new CredentialStore(env.ConfigDirectory);
@@ -474,6 +469,17 @@ internal static class CliApp
             {
                 env.Out.WriteLine($"Not signed in to {CredentialStore.Key(console)}.");
                 return 0;
+            }
+            // A console token is revoked there too (a Keycloak session just ends when its tokens do).
+            if (store.Get(console) is { Kind: SavedLogin.Console } saved)
+            {
+                try
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Delete, new Uri(console, "api/tokens/current"));
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", saved.AccessToken);
+                    using var _ = await http.SendAsync(request, ct);
+                }
+                catch (HttpRequestException) { }   // offline: forget it here anyway
             }
             store.Put(console, null);
             env.Out.WriteLine($"Signed out of {CredentialStore.Key(console)}.");

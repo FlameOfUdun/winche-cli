@@ -3,11 +3,17 @@ using System.Text.Json.Serialization;
 
 namespace Winche.Cli;
 
-/// <summary>One console's saved sign-in (Keycloak tokens from <c>winche login</c>).</summary>
+/// <summary>
+/// One console's saved sign-in from <c>winche login</c>: Keycloak tokens (refreshed), or a console token from the
+/// browser approval (<see cref="Console"/>; 90 days, then sign in again).
+/// </summary>
 internal sealed class SavedLogin
 {
-    [JsonPropertyName("tokenEndpoint")] public required string TokenEndpoint { get; set; }
-    [JsonPropertyName("clientId")] public required string ClientId { get; set; }
+    public const string Keycloak = "keycloak", Console = "console";
+
+    [JsonPropertyName("kind")] public string Kind { get; set; } = Keycloak;
+    [JsonPropertyName("tokenEndpoint")] public string TokenEndpoint { get; set; } = "";
+    [JsonPropertyName("clientId")] public string ClientId { get; set; } = "";
     [JsonPropertyName("accessToken")] public required string AccessToken { get; set; }
     [JsonPropertyName("refreshToken")] public string? RefreshToken { get; set; }
     [JsonPropertyName("expiresAt")] public DateTimeOffset ExpiresAt { get; set; }

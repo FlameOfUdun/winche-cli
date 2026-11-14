@@ -18,7 +18,7 @@ dotnet tool install -g Winche.Cli
 winche init --console https://api.example.com/_console   # winche.json, rules files and their test files
 winche use --add prod https://api.example.com/_console   # name a console (and use it here)
 winche use dev                                           # switch projects; `winche use` lists them
-winche login                                             # browser sign-in (Keycloak)
+winche login                                             # browser sign-in (the console's Keycloak, or its own accounts)
 winche rules validate                                    # offline: syntax, paths, unknown functions
 winche rules test                                        # offline: run the allow/deny cases
 winche rules diff                                        # local files vs. what the console enforces
@@ -28,6 +28,8 @@ winche rules history                                     # the console's version
 winche rules history 3 --only database                   # version 3 against the active one
 winche rules rollback 3 --only database                  # make version 3 active again
 winche rules pull                                        # write the live rules into the files
+winche functions init                                    # a functions/ folder: index.ts, deno.json, types for VS Code
+winche functions deploy -m "what changed"                # deploy it through the console, as you (or a CI token)
 winche emulators start                                   # database, storage and console locally
 winche emulators exec "npm test"                         # …around a command (CI)
 winche emulators token u1 role=admin                     # a sign-in token the emulators accept
@@ -35,7 +37,7 @@ winche configure --url https://api.example.com          # lib/winche_options.dar
 winche logout
 ```
 
-Options: `-P/--project <alias>`, `--console <url>`, `--token <jwt>`, `--config <path>`, `--only database|storage`,
+Options: `-P/--project <alias>`, `--console <url>`, `--token <token>`, `--config <path>`, `--only database|storage`,
 `-m/--message <note>` (deploy), `--force` (deploy unchanged files too), `--skip-tests` (deploy), `-y/--yes`
 (rollback without a prompt), `--stdout` (pull), `--port <n>` (login).
 Run `winche --help` for the full list.
@@ -167,15 +169,21 @@ pick one with `--only`.
 
 ## Signing in
 
-`winche login` signs in with the console's own Keycloak client (authorization code + PKCE with a loopback
-redirect, RFC 8252) and saves the tokens in `~/.config/winche/credentials.json`, readable by you only. They
-are refreshed as needed.
+`winche login` opens your browser, like `firebase login`, and saves the sign-in in
+`~/.config/winche/credentials.json`, readable by you only. Both use PKCE and a loopback redirect
+(`http://127.0.0.1:9005/callback`, or `--port <n>`; RFC 8252).
 
-- **Register the redirect URI** `http://127.0.0.1:9005/callback` on the console's Keycloak client (or use
-  `--port <n>` and register that port).
-- The account needs the console's **Admin** role.
-- **CI:** pass a bearer token for the console client with `--token` or `WINCHE_TOKEN`, and the console with
-  `--console` or `WINCHE_CONSOLE`.
+- **A console with its own accounts:** the console asks you (signed in there) to allow the CLI. It then acts as you,
+  with your role as it is at each request, for 90 days. `winche logout` ends it; admins see and can end everyone's
+  under **Access → CI tokens**.
+- **A Keycloak console:** you sign in with the console's Keycloak client; its tokens are refreshed as needed.
+  Register the redirect URI on that client.
+- Deploying needs the console's **Admin** role (and two-step sign-in, where the console requires it for settings).
+- **CI:** an admin makes a **CI token** under **Access → CI tokens**: named (e.g. `gitlab-main`), limited to deploying
+  functions and/or rules, expiring (30 days to 2 years), revocable. Set `WINCHE_TOKEN` to it (and the console with
+  `--console` or `WINCHE_CONSOLE`): `winche functions deploy` and `winche rules deploy` then run as that token, named
+  in the version history ("gitlab-main (CI token by ann@example.com)"). It stops working if its maker is no longer an
+  admin, and can't do anything but deploy.
 
 ## Emulators
 
@@ -226,12 +234,12 @@ when signed in). The [Winche VS Code extension](https://github.com/FlameOfUdun/w
 
 ## Requirements
 
-- A host app running Winche.Console 4.0.0+ in **Keycloak mode** with the rules editor enabled
-  (`o.AddDatabaseTab(b => b.UseRulesEditor())`, `o.AddStorageTab(b => b.UseRulesEditor())`). Identity-mode
-  consoles sign in with cookies, which the CLI doesn't use.
+- A host app running Winche.Console with `AddWincheConfig` (where CLI sign-ins and CI tokens are kept), the rules
+  editor enabled for rules (`o.AddDatabaseTab(b => b.UseRulesEditor())`, `o.AddStorageTab(b => b.UseRulesEditor())`)
+  and Winche.Functions for functions.
 - .NET 10 SDK.
 
-The CLI talks to the console's `api/rules` HTTP API; it doesn't depend on the console package.
+The CLI talks to the console's HTTP API (`api/rules`, `api/functions`).
 
 ## Develop
 
