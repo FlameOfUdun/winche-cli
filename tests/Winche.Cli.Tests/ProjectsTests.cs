@@ -115,3 +115,32 @@ public sealed class ProjectsTests(PostgresFixture fx) : IAsyncLifetime, IDisposa
         Assert.Contains("* a", (await Run("use")).Out);
     }
 }
+
+/// <summary><c>--project &lt;id&gt;</c> for a project on the same Winche Server (<c>/p/&lt;id&gt;</c>).</summary>
+public sealed class ServerProjectTargetTests
+{
+    [Theory]
+    [InlineData("https://api.example.com/_console/", "wards", "https://api.example.com/p/wards/_console/")]
+    [InlineData("https://api.example.com/p/clinic/_console", "wards", "https://api.example.com/p/wards/_console/")]
+    [InlineData("https://example.com/winche/_console", "wards", "https://example.com/winche/p/wards/_console/")]
+    [InlineData("https://example.com/winche/p/a/admin", "b", "https://example.com/winche/p/b/admin/")]
+    public void A_project_id_maps_to_its_console_on_the_same_server(string console, string id, string expected) =>
+        Assert.Equal(expected, ConsoleTarget.ForProject(new Uri(console), id).ToString());
+
+    [Fact]
+    public void Project_is_an_alias_first_else_an_id_on_the_server_otherwise_used()
+    {
+        static CliEnvironment Env(Func<string, string?> vars) => new()
+        {
+            Out = TextWriter.Null, Error = TextWriter.Null, WorkingDirectory = Path.GetTempPath(), ConfigDirectory = Path.GetTempPath(),
+            GetVariable = vars, Http = new HttpClientHandler(), OpenBrowser = _ => { },
+        };
+        var env = Env(name => name == "WINCHE_CONSOLE" ? "https://api.example.com/_console" : null);
+        var config = new ProjectConfig { Projects = new() { ["prod"] = "https://prod.example.com/_console" } };
+        Assert.Equal("https://prod.example.com/_console/", ConsoleTarget.Resolve(config, null, "prod", env)!.Url.ToString());
+        Assert.Throws<CliException>(() => ConsoleTarget.Resolve(config, null, "wards", env));   // with aliases, an unknown name is a typo
+        Assert.Equal("https://api.example.com/p/wards/_console/", ConsoleTarget.Resolve(new ProjectConfig(), null, "wards", env)!.Url.ToString());
+        var nowhere = Env(_ => null);
+        Assert.Throws<CliException>(() => ConsoleTarget.Resolve(new ProjectConfig(), null, "wards", nowhere));
+    }
+}

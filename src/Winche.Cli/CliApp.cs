@@ -26,6 +26,7 @@ internal static class CliApp
           rules rollback <v>   Make version <v> active again (saved as a new version)
           rules diff           Show how the rules files differ from what the console enforces
           rules pull           Write the console's live rules into the rules files
+          projects             The projects on the console's Winche Server that you can use
           configure            Write lib/winche_options.dart for a Flutter or Dart app, from a Winche server
                                (--url; default the emulators), like flutterfire configure
           functions init [<dir>]
@@ -42,7 +43,8 @@ internal static class CliApp
 
         Options:
           --console <url>      Console URL, e.g. https://api.example.com/_console (or WINCHE_CONSOLE, or winche.json)
-          -P, --project <name> A project from winche.json's "projects" (instead of the one picked with winche use)
+          -P, --project <name> A project from winche.json's "projects" (instead of the one picked with winche use), or
+                               a project id on the same Winche Server; configure: the project at --url/p/<id>
           --token <token>      A CI token from the console (Project settings → CLI and CI) instead of a saved sign-in (or WINCHE_TOKEN)
           --config <path>      winche.json to use (default: the nearest one upward)
           --only <list>        database, storage, or database,storage (default: every file in winche.json)
@@ -99,6 +101,7 @@ internal static class CliApp
                 "rules diff" => await run.DiffAsync(ct),
                 "rules pull" => await run.PullAsync(ct),
                 "configure" => await run.ConfigureAsync(ct),
+                "projects" => await run.ProjectsAsync(ct),
                 "functions init" => run.FunctionsInit(a.Positional.ElementAtOrDefault(2)),
                 "functions deploy" => await run.FunctionsDeployAsync(a.Positional.ElementAtOrDefault(2), ct),
                 "emulators start" => await run.EmulatorsAsync(null, ct),
@@ -300,6 +303,34 @@ internal static class CliApp
             return 0;
         }
 
+        // ----- projects ----------------------------------------------------------------------------
+
+        /// <summary>The projects on the console's Winche Server that this account may use (and the archived, for server admins).</summary>
+        public async Task<int> ProjectsAsync(CancellationToken ct)
+        {
+            var body = await (await ClientAsync(ct)).GetJsonAsync("api/projects", ct);
+            var console = ConsoleUrl();
+            if (body["available"]?.GetValue<bool>() != true)
+            {
+                env.Out.WriteLine($"{console} runs one project: {body["current"]}.");
+                return 0;
+            }
+            var current = body["current"]?.GetValue<string>();
+            foreach (var p in body["projects"]!.AsArray())
+            {
+                var id = p!["id"]!.GetValue<string>();
+                var url = new Uri(console, p["consoleUrl"]!.GetValue<string>().TrimEnd('/') + "/");
+                env.Out.WriteLine($"{(id == current ? "*" : " ")} {id,-24} {p["name"]}  {url}");
+            }
+            if (body["archived"]?.AsArray() is { Count: > 0 } archived)
+            {
+                env.Out.WriteLine("Archived:");
+                foreach (var a in archived) env.Out.WriteLine($"  {a!["id"],-24} {a["name"]}");
+            }
+            env.Out.WriteLine("Use one: --project <id> (or winche use --add <alias> <its console>).");
+            return 0;
+        }
+
         // ----- configure ---------------------------------------------------------------------------
 
         /// <summary>
@@ -309,6 +340,12 @@ internal static class CliApp
         public async Task<int> ConfigureAsync(CancellationToken ct)
         {
             var url = (args.Value("url") ?? env.GetVariable("WINCHE_SERVER") ?? $"http://localhost:{args.Value("port") ?? "9090"}").TrimEnd('/');
+            // --project <id>: that project on a Winche Server with several (/p/<id>).
+            if (args.Value("project") is { } projectId && args.Value("url") is not null)
+            {
+                if (!Winche.Console.Project.ProjectSetup.IsValidId(projectId)) throw new CliException($"--project {projectId} isn't a project id.", 2);
+                url = $"{url}/p/{projectId}";
+            }
             if (!Uri.TryCreate(url, UriKind.Absolute, out var server) || server.Scheme is not ("http" or "https"))
                 throw new CliException($"{url} isn't an address. Pass --url https://api.example.com", 2);
 

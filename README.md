@@ -101,6 +101,12 @@ and CI job picks its own); `winche use` lists them (`*` is the picked one); `win
 Which console a command uses: `--console`, else `-P/--project`, else `WINCHE_CONSOLE`, else the picked project,
 else the only project, else `"console"`. Sign-ins are kept per console, so switching doesn't sign you out.
 
+A Winche Server can run several projects, each at `/p/<id>` with its console at `/p/<id>/_console`. `winche projects`
+lists the ones on the current console's server that you can use (and, for server admins, the archived ones). Name
+them with `winche use --add <alias> https://api.example.com/p/<id>/_console`; without any aliases in `winche.json`,
+`--project <id>` reaches a project on the same server directly. Each project's console has its own sign-in for the
+CLI (`winche login --project <id>`). For an app, `winche configure --url https://api.example.com --project <id>`.
+
 ## Testing rules
 
 `winche rules test` runs checks against the local rules files, offline, so CI can catch a rule mistake before

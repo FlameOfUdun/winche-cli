@@ -105,6 +105,24 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         }
     }
 
+    /// <summary>GETs <paramref name="path"/> as JSON; sign-in and role problems throw.</summary>
+    public async Task<System.Text.Json.Nodes.JsonObject> GetJsonAsync(string path, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(console, path));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        HttpResponseMessage response;
+        try { response = await http.SendAsync(request, ct); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        using (response)
+        {
+            var text = await response.Content.ReadAsStringAsync(ct);
+            if (response.StatusCode == HttpStatusCode.Unauthorized) throw new CliException($"Not signed in to {console} (or the session ended). Run: winche login");
+            if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{console}: this project is archived.");
+            if (!response.IsSuccessStatusCode) throw new CliException($"The console answered {(int)response.StatusCode} {response.ReasonPhrase}.");
+            return System.Text.Json.Nodes.JsonNode.Parse(text) as System.Text.Json.Nodes.JsonObject ?? throw new CliException("The console sent an unreadable response.");
+        }
+    }
+
     /// <summary>
     /// POSTs <paramref name="body"/> to <paramref name="path"/>; the answer, and whether it succeeded. Sign-in, role and
     /// reachability problems throw; anything else the console refused comes back for the caller to show.

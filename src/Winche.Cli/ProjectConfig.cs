@@ -104,11 +104,16 @@ internal sealed record ConsoleTarget(Uri Url, string? Alias)
         if (consoleArg is not null) return new(Parse(consoleArg), null);
         var projects = config?.Projects ?? [];
         if (projectArg is not null)
-            return projects.TryGetValue(projectArg, out var url)
-                ? new(Parse(url), projectArg)
-                : throw new CliException(projects.Count == 0
-                    ? $"--project {projectArg}: {ProjectConfig.FileName} has no \"projects\". Add one: winche use --add {projectArg} <console url>"
-                    : $"--project {projectArg}: no such project (have {string.Join(", ", projects.Keys)}).");
+        {
+            if (projects.TryGetValue(projectArg, out var url)) return new(Parse(url), projectArg);
+            // Without aliases: a project id on the same Winche Server as the console otherwise used (/p/<id>/…). With
+            // aliases, an unknown name is a typo, not a project to go looking for.
+            if (projects.Count == 0 && Resolve(config, null, null, env) is { } server && Winche.Console.Project.ProjectSetup.IsValidId(projectArg))
+                return new(ForProject(server.Url, projectArg), projectArg);
+            throw new CliException(projects.Count == 0
+                ? $"--project {projectArg}: no console to find it on. Pass --console <url>, or add one: winche use --add {projectArg} <console url>"
+                : $"--project {projectArg}: no such project (have {string.Join(", ", projects.Keys)}). A project on the same server: winche use --add {projectArg} <its console> (winche projects lists them).");
+        }
         if (env.GetVariable("WINCHE_CONSOLE") is { Length: > 0 } fromEnv) return new(Parse(fromEnv), null);
         if (config?.FilePath is { } file && ActiveProjects.Get(env, file) is { } active)
             return projects.TryGetValue(active, out var url)
@@ -119,6 +124,20 @@ internal sealed record ConsoleTarget(Uri Url, string? Alias)
         if (projects.Count > 1)
             throw new CliException($"Which project? Run winche use <alias> ({string.Join(", ", projects.Keys)}), or pass --project.");
         return null;
+    }
+
+    /// <summary>
+    /// The console of project <paramref name="id"/> on the same Winche Server as <paramref name="console"/>:
+    /// <c>https://host/_console</c> or <c>https://host/p/other/_console</c> → <c>https://host/p/&lt;id&gt;/_console</c>.
+    /// </summary>
+    public static Uri ForProject(Uri console, string id)
+    {
+        var path = console.AbsolutePath.TrimEnd('/');
+        var last = path.LastIndexOf('/');
+        var (root, prefix) = last < 0 ? ("", path) : (path[..last], path[last..]);
+        var marker = root.LastIndexOf("/p/", StringComparison.Ordinal);
+        if (marker >= 0 && root.IndexOf('/', marker + 3) < 0) root = root[..marker];
+        return new Uri(console, $"{root}/p/{Uri.EscapeDataString(id)}{prefix}/");
     }
 
     public static Uri Parse(string raw) =>
