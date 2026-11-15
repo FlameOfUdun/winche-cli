@@ -45,6 +45,27 @@ internal static partial class CliApp
                                to set their password (emailed when the server can send email)
           products             The project's products, and whether they're started
           products:start <p>…  Start products (database, storage, authentication, functions) and follow their setup
+          members:remove <email>  Take someone's access away (the first project: their role, or their invite)
+          invites, invites:revoke <email>  The first project's pending invites
+          apps:delete <id>     Remove a registered app
+          projects:archive | projects:restore | projects:delete <id>
+                               Archive a project (refused until restored), or delete an archived one for good
+          secrets, secrets:set smtp-password | keycloak-sync --provider <name>
+                               The project's sign-in secrets (the value from WINCHE_SECRET, or typed unseen)
+          webhooks:secret <id> A webhook's signing secret (--rotate: a new one)
+          users, users:disable | users:enable | users:sign-out <email or uid>
+                               Your apps' users (--search, --limit)
+          storage:move         Where files are kept; --bucket/--region/--service-url/--access-key (WINCHE_SECRET: the
+                               secret key) or --to server copies them there, then switches; --finish, --cancel
+          data:move            Where the project's database is; --db-name/--db-host/… moves it; --finish [--keep-old]
+          logs                 The project's logs (--product database|storage, --level, --search, --since 1h,
+                               --limit; -f/--follow keeps printing new ones)
+          login:approve <code> Allow a CLI waiting with winche login --no-browser, as you
+          server settings pull | diff | deploy
+                               The server's own settings as files (server admins)
+          server secrets, server secrets:set <name>   The server's secrets (WINCHE_SECRET, or typed unseen)
+          server users, server users:disable | server users:enable | server users:sign-out <email>
+                               The console's accounts
           tokens:list          The project's CI tokens
           tokens:create <name> Make a CI token (--scopes functions,rules,indexes; --days, default 90; --quiet: only it)
           tokens:revoke <id>   Revoke a CI token (by id or name)
@@ -112,7 +133,10 @@ internal static partial class CliApp
             }
 
             using var http = new HttpClient(env.Http, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(60) };
-            var command = string.Join(' ', a.Positional.Take(a.Positional[0] is "rules" or "emulators" or "functions" or "indexes" or "settings" or "2fa" ? 2 : 1));
+            var command = string.Join(' ', a.Positional.Take(
+                a.Positional[0] is "rules" or "emulators" or "functions" or "indexes" or "settings" or "2fa" ? 2
+                : a.Positional[0] == "server" ? (a.Positional.ElementAtOrDefault(1) == "settings" ? 3 : 2) : 1));
+            string? Arg(int i) => a.Positional.ElementAtOrDefault(i);
             var run = new Run(env, a, http);
             return command switch
             {
@@ -140,6 +164,31 @@ internal static partial class CliApp
                 "apps:create" => await run.AppsCreateAsync(a.Positional.ElementAtOrDefault(1), ct),
                 "members" => await run.MembersListAsync(ct),
                 "members:add" => await run.MembersAddAsync(a.Positional.ElementAtOrDefault(1), ct),
+                "members:remove" => await run.MembersRemoveAsync(Arg(1), ct),
+                "invites" => await run.InvitesAsync(ct),
+                "invites:revoke" => await run.InvitesRevokeAsync(Arg(1), ct),
+                "apps:delete" => await run.AppsDeleteAsync(Arg(1), ct),
+                "projects:archive" => await run.ProjectsChangeAsync("archive", Arg(1), ct),
+                "projects:restore" => await run.ProjectsChangeAsync("restore", Arg(1), ct),
+                "projects:delete" => await run.ProjectsChangeAsync("delete", Arg(1), ct),
+                "secrets" => await run.SecretsAsync(null, ct),
+                "secrets:set" => await run.SecretsAsync(Arg(1) ?? throw new CliException("Usage: winche secrets:set smtp-password | keycloak-sync --provider <name>", 2), ct),
+                "webhooks:secret" => await run.WebhookSecretAsync(Arg(1), ct),
+                "server settings pull" or "server settings diff" or "server settings deploy" => await run.ServerSettingsAsync(Arg(2)!, ct),
+                "server secrets" => await run.ServerSecretsAsync(null, ct),
+                "server secrets:set" => await run.ServerSecretsAsync(Arg(2) ?? throw new CliException("Usage: winche server secrets:set <name>", 2), ct),
+                "server users" => await run.ServerUsersAsync(null, null, ct),
+                "server users:disable" => await run.ServerUsersAsync("disable", Arg(2), ct),
+                "server users:enable" => await run.ServerUsersAsync("enable", Arg(2), ct),
+                "server users:sign-out" => await run.ServerUsersAsync("sign-out", Arg(2), ct),
+                "users" => await run.AppUsersAsync(null, null, ct),
+                "users:disable" => await run.AppUsersAsync("disable", Arg(1), ct),
+                "users:enable" => await run.AppUsersAsync("enable", Arg(1), ct),
+                "users:sign-out" => await run.AppUsersAsync("sign-out", Arg(1), ct),
+                "storage:move" => await run.StorageMoveAsync(ct),
+                "data:move" => await run.DataMoveAsync(ct),
+                "login:approve" => await run.LoginApproveAsync(Arg(1), ct),
+                "logs" => await run.LogsAsync(ct),
                 "products:start" => await run.ProductsStartAsync(a.Positional.Skip(1).ToList(), ct),
                 "tokens:list" => await run.TokensListAsync(ct),
                 "tokens:create" => await run.TokensCreateAsync(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche tokens:create <name> --scopes functions,rules,indexes [--days 90]", 2), ct),
@@ -1103,11 +1152,13 @@ internal static partial class CliApp
 /// <summary>Positional words plus <c>--name value</c> / <c>--flag</c> options.</summary>
 internal sealed class Args
 {
-    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose", "reauth", "no-browser"];
+    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose", "reauth", "no-browser",
+        "rotate", "path-style", "finish", "cancel", "keep-old", "follow"];
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
-        "role", "sdk", "android-package", "apple-bundle-id", "web-origin"];
-    private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project" };
+        "role", "sdk", "android-package", "apple-bundle-id", "web-origin",
+        "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit"];
+    private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project", ["-f"] = "follow" };
 
     public List<string> Positional { get; } = [];
     private readonly Dictionary<string, string?> _options = new(StringComparer.Ordinal);

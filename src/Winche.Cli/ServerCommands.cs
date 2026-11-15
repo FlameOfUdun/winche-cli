@@ -412,16 +412,17 @@ internal static partial class CliApp
 
         private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-        private IReadOnlyList<SettingsFile> SelectedSettings()
+        private IReadOnlyList<SettingsFile> SelectedSettings(IReadOnlyList<SettingsFile> files)
         {
-            if (args.Value("only") is not { } only) return SettingsFiles;
+            if (args.Value("only") is not { } only) return files;
             var wanted = only.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (wanted.FirstOrDefault(w => SettingsFiles.All(f => f.Name != w)) is { } unknown)
-                throw new CliException($"--only {unknown}: settings files are {string.Join(", ", SettingsFiles.Select(f => f.Name))}.", 2);
-            return [.. SettingsFiles.Where(f => wanted.Contains(f.Name))];
+            if (wanted.FirstOrDefault(w => files.All(f => f.Name != w)) is { } unknown)
+                throw new CliException($"--only {unknown}: settings files are {string.Join(", ", files.Select(f => f.Name))}.", 2);
+            return [.. files.Where(f => wanted.Contains(f.Name))];
         }
 
-        private string SettingsDirectory => Path.Combine(Path.GetDirectoryName(RequireConfig().FilePath!)!, "settings");
+        /// <summary><c>settings/</c> beside winche.json (or here, for the server's own settings without a project).</summary>
+        private string SettingsDirectory => Path.Combine(Config?.FilePath is { } config ? Path.GetDirectoryName(config)! : env.WorkingDirectory, "settings");
 
         private string SettingsPath(SettingsFile f) => Path.Combine(SettingsDirectory, f.Name + ".json");
 
@@ -440,11 +441,12 @@ internal static partial class CliApp
         private static string Text(JsonNode node) => node.ToJsonString(Pretty) + "\n";
 
         /// <summary><c>winche settings pull</c>: writes the project's settings into <c>settings/*.json</c>.</summary>
-        public async Task<int> SettingsPullAsync(CancellationToken ct)
+        public async Task<int> SettingsPullAsync(CancellationToken ct) { RequireConfig(); return await PullAsync(await ClientAsync(ct), SettingsFiles, ct); }
+
+        private async Task<int> PullAsync(ConsoleClient client, IReadOnlyList<SettingsFile> files, CancellationToken ct)
         {
-            var client = await ClientAsync(ct);
             Directory.CreateDirectory(SettingsDirectory);
-            foreach (var f in SelectedSettings())
+            foreach (var f in SelectedSettings(files))
             {
                 if (await LiveAsync(client, f, ct) is not { } live)
                 {
@@ -458,11 +460,12 @@ internal static partial class CliApp
         }
 
         /// <summary><c>winche settings diff</c>: how the files differ from the project's settings.</summary>
-        public async Task<int> SettingsDiffAsync(CancellationToken ct)
+        public async Task<int> SettingsDiffAsync(CancellationToken ct) { RequireConfig(); return await DiffAsync(await ClientAsync(ct), SettingsFiles, ct); }
+
+        private async Task<int> DiffAsync(ConsoleClient client, IReadOnlyList<SettingsFile> files, CancellationToken ct)
         {
-            var client = await ClientAsync(ct);
             var any = false;
-            foreach (var (f, file, live) in await LocalAndLiveAsync(client, ct))
+            foreach (var (f, file, live) in await LocalAndLiveAsync(client, files, ct))
             {
                 var before = live is null ? "" : Text(live.Value.Settings);
                 var after = Text(file);
@@ -475,12 +478,13 @@ internal static partial class CliApp
         }
 
         /// <summary><c>winche settings deploy -m "why"</c>: saves changed files as new versions (with the note in the history).</summary>
-        public async Task<int> SettingsDeployAsync(CancellationToken ct)
+        public async Task<int> SettingsDeployAsync(CancellationToken ct) { RequireConfig(); return await DeployAsync(await ClientAsync(ct), SettingsFiles, ct); }
+
+        private async Task<int> DeployAsync(ConsoleClient client, IReadOnlyList<SettingsFile> files, CancellationToken ct)
         {
-            var client = await ClientAsync(ct);
             var note = args.Value("message") ?? DefaultNote().Replace("winche rules deploy", "winche settings deploy");
             var changed = 0;
-            foreach (var (f, file, live) in await LocalAndLiveAsync(client, ct))
+            foreach (var (f, file, live) in await LocalAndLiveAsync(client, files, ct))
             {
                 if (live is null) throw new CliException($"{f.Name}: the project has none to change (its product isn't started, or the app's code sets it).");
                 if (Text(live.Value.Settings) == Text(file) && !args.Flag("force")) { env.Out.WriteLine($"  {f.Name}: unchanged"); continue; }
@@ -505,10 +509,10 @@ internal static partial class CliApp
         }
 
         /// <summary>Each selected settings file that exists here, read, with the server's.</summary>
-        private async Task<List<(SettingsFile File, JsonObject Local, (JsonObject Settings, JsonObject Full, int Version)? Live)>> LocalAndLiveAsync(ConsoleClient client, CancellationToken ct)
+        private async Task<List<(SettingsFile File, JsonObject Local, (JsonObject Settings, JsonObject Full, int Version)? Live)>> LocalAndLiveAsync(ConsoleClient client, IReadOnlyList<SettingsFile> files, CancellationToken ct)
         {
             var list = new List<(SettingsFile, JsonObject, (JsonObject, JsonObject, int)?)>();
-            foreach (var f in SelectedSettings())
+            foreach (var f in SelectedSettings(files))
             {
                 var path = SettingsPath(f);
                 if (!File.Exists(path))

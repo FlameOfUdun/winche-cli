@@ -35,6 +35,12 @@ winche apps:create "Clinic iOS" --apple-bundle-id com.example.clinic   # registe
 winche members:add ann@example.com --role Member         # give someone access (also: winche members)
 winche settings pull                                     # the project's settings into settings/*.json (also diff, deploy)
 winche tokens:create gitlab-main --scopes rules,indexes  # a CI token (also tokens:list, tokens:revoke)
+winche logs -f                                           # the project's logs, then new ones as they come
+winche users                                             # your apps' users (users:disable, users:enable, users:sign-out)
+winche secrets:set smtp-password                         # a secret, typed unseen or from WINCHE_SECRET
+winche storage:move --bucket files --region eu-west-1 …  # move the project's files to a bucket (data:move: its database)
+winche login:approve BCDF-GHJK                           # allow a CLI waiting with --no-browser, as you
+winche server settings pull                              # the server's own settings as files (server admins)
 winche indexes deploy -m "why"                           # database.indexes to the console (also diff, pull)
 winche functions init                                    # a functions/ folder: index.ts, deno.json, types for VS Code
 winche functions deploy -m "what changed"                # deploy it through the console, as you (or a CI token)
@@ -53,8 +59,9 @@ Run `winche --help` for the full list.
 
 ## Without the console
 
-Everything a project needs can be done from the terminal; the console is there to look at things (data, files, users,
-logs) and for what's easier on a page.
+Everything a project and the server need can be done from the terminal, from setting a server up to moving its
+data. The console is there for looking around (the data browser, files, function runs) and for what's easier on a
+page.
 
 ```sh
 export WINCHE_ADMIN_PASSWORD=...                       # or it's asked for (not shown as you type)
@@ -95,6 +102,33 @@ winche settings pull                                   # settings/database.json,
   project goes by the accounts' own roles: someone new is invited with that role, an existing account is given it
   (Admin there is a server admin). Links are emailed when the server can send email, else printed to pass on.
   `winche members` lists who has access.
+- **Taking things back:** `winche members:remove <email>` (in the first project: their role, or their pending
+  invite; the account stays), `winche invites` / `invites:revoke <email>`, `winche apps:delete <id>`, and for server
+  admins `winche projects:archive | projects:restore <id>` and `projects:delete <id>` (archived first; asks you to type
+  the id, or `--yes`). Anything that can't be undone asks first; without a terminal it needs `--yes`.
+- **Secrets** are never on the command line: they're typed unseen, or read from `WINCHE_SECRET`. `winche secrets`
+  lists the project's (`smtp-password`, and `keycloak-sync --provider <name>` for providers kept in step with
+  Keycloak); `winche secrets:set <name>` sets one. `winche webhooks:secret <id>` prints a webhook's signing secret
+  (`--rotate` makes a new one).
+- **Your apps' users:** `winche users [--search ann] [--limit 50]`, `users:disable | users:enable | users:sign-out
+  <email or uid>`.
+- **Logs:** `winche logs` prints the latest entries, oldest first (`--product database|storage`, `--level warning`,
+  `--search …`, `--since 30m|2h|1d`, `--limit`). `-f` / `--follow` keeps printing new ones as they come, until
+  Ctrl+C.
+- **Moving files:** `winche storage:move` says where the files are. With `--bucket`, `--region`, `--service-url` (for
+  S3-compatible services), `--access-key` and `--path-style` (the secret key in `WINCHE_SECRET`), or `--to server`,
+  it copies every file there, shows the progress, then switches the project to it. `--finish` ends the move once
+  the server's catch-up pass has run (it says when); `--cancel` stops a move before the switch.
+- **Moving the database** (server admins): `winche data:move` says where it is; `--db-name` (and `--db-host`,
+  `--db-port`, `--db-user`, `--db-ssl`, `WINCHE_DB_PASSWORD`) checks the target, then moves it while the project
+  pauses. `--finish` deletes the old copy (`--keep-old` keeps it).
+- **The server itself** (server admins): `winche server settings pull | diff | deploy` keeps `settings/server.json`
+  (the console's sign-in providers, email) and `settings/server.auth.json` (the console accounts' passwords, two-step,
+  sessions, lockout) as files. `winche server secrets` / `server secrets:set <name>` (the console's SMTP password,
+  providers' client secrets). `winche server users`, `server users:disable | server users:enable | server
+  users:sign-out <email>` for the console's accounts (the last admin can't be turned off).
+- **Another machine without a browser:** run `winche login --no-browser` there, and allow its code from a CLI that's
+  signed in as you: `winche login:approve <code>`. No browser is needed anywhere.
 - **CI tokens:** `winche tokens:create <name> --scopes functions,rules,indexes [--days 90]` shows the token once
   (`--quiet`: only the token, for scripts). `tokens:list`, `tokens:revoke <id or name>`. A CI token can't make tokens.
 - **No browser here** (an SSH session, a server): `winche login --no-browser` shows a code and an address. Open it on

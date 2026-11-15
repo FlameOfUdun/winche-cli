@@ -293,6 +293,70 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Access_is_taken_back_from_the_terminal()
+    {
+        await SetupAsync();
+        // An invite revoked; a role taken away (the account stays); an app removed, after asking.
+        await Run(null, "members:add", "dave@example.com", "--role", "Viewer");
+        Assert.Contains("dave@example.com", (await Run(null, "invites")).Out);
+        Assert.Contains("Revoked dave@example.com's invite", (await Run(null, "invites:revoke", "dave@example.com")).Out);
+        Assert.Contains("No pending invites", (await Run(null, "invites")).Out);
+
+        using var admin = _app.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
+        (await admin.PostAsJsonAsync("/_console/api/auth/login", new { email = "ann@example.com", password = Password })).EnsureSuccessStatusCode();
+        (await admin.PostAsJsonAsync("/_console/api/users", new { email = "erin@example.com", role = "Member", password = Password })).EnsureSuccessStatusCode();
+        Assert.Contains("erin@example.com no longer has a role here", (await Run(null, "members:remove", "erin@example.com")).Out);
+        Assert.DoesNotContain("erin@example.com", (await Run(null, "members")).Out);
+        Assert.Contains("has no access here", (await Run(null, "members:remove", "erin@example.com")).Err);
+
+        await Run(null, "apps:create", "Clinic", "--id", "clinic-app");
+        var unasked = await Run(null, "apps:delete", "clinic-app");
+        Assert.Equal(2, unasked.Exit);
+        Assert.Contains("Pass --yes", unasked.Err);
+        Assert.Equal(1, (await Run("n\n", "apps:delete", "clinic-app")).Exit);   // answered no
+        Assert.Contains("Removed the app clinic-app", (await Run(null, "apps:delete", "clinic-app", "--yes")).Out);
+        Assert.Contains("No app clinic-app", (await Run(null, "apps:delete", "clinic-app", "--yes")).Err);
+    }
+
+    [Fact]
+    public async Task A_signed_in_cli_approves_another_waiting_with_a_code()
+    {
+        await SetupAsync();
+        var otherConfig = Directory.CreateTempSubdirectory("winche-cli-other-").FullName;
+        var text = new StringWriter();
+        var output = TextWriter.Synchronized(text);
+        var env = new CliEnvironment
+        {
+            Out = output, Error = new StringWriter(), WorkingDirectory = _dir, ConfigDirectory = otherConfig,
+            GetVariable = _ => null, Http = _app.Server.CreateHandler(), OpenBrowser = _ => { },
+        };
+        var waiting = CliApp.RunAsync(["login", "--url", "http://localhost", "--no-browser"], env);
+        string? code = null;
+        for (var i = 0; i < 100 && code is null; i++)
+        {
+            await Task.Delay(50);
+            code = System.Text.RegularExpressions.Regex.Match(text.ToString(), @"Your code: ([A-Z]{4}-[A-Z]{4})") is { Success: true } m ? m.Groups[1].Value : null;
+        }
+        Assert.NotNull(code);
+        Assert.Contains("isn't right", (await Run(null, "login:approve", "BBBB-BBBB", "--yes")).Err);
+        var approved = await Run(null, "login:approve", code!, "--yes");
+        Assert.True(approved.Exit == 0, approved.Err);
+        Assert.Equal(0, await waiting);
+        Assert.Contains("Signed in to http://localhost/_console as ann@example.com", text.ToString());
+
+        // A CI token can't approve anyone.
+        var ci = (await Run(null, "tokens:create", "ci", "--scopes", "rules", "--quiet")).Out.Trim();
+        var device = JsonNode.Parse(await (await _app.CreateClient().PostAsJsonAsync("/_console/api/cli-login/device",
+            new { challenge = new string('a', 43), name = "box" })).Content.ReadAsStringAsync())!;
+        _vars["WINCHE_TOKEN"] = ci;
+        Assert.NotEqual(0, (await Run(null, "login:approve", device["userCode"]!.GetValue<string>(), "--yes")).Exit);
+        _vars.Remove("WINCHE_TOKEN");
+        Assert.Contains("pending", await (await _app.CreateClient().PostAsJsonAsync("/_console/api/cli-login/device/poll",
+            new { deviceCode = device["deviceCode"]!.GetValue<string>() })).Content.ReadAsStringAsync());
+        Directory.Delete(otherConfig, recursive: true);
+    }
+
+    [Fact]
     public async Task Tokens_quiet_prints_only_the_token_even_with_a_named_project()
     {
         await SetupAsync();
