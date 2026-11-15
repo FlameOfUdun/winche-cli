@@ -251,6 +251,43 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Apps_are_registered_and_listed_from_the_terminal()
+    {
+        await SetupAsync();
+        Assert.Contains("No apps registered", (await Run(null, "apps")).Out);
+        var made = await Run(null, "apps:create", "Clinic iOS", "--id", "clinic-ios", "--apple-bundle-id", "com.example.clinic", "--web-origin", "https://a.example, https://b.example");
+        Assert.True(made.Exit == 0, made.Err);
+        Assert.Contains("winche configure --url http://localhost --app clinic-ios", made.Out);
+        var list = await Run(null, "apps");
+        Assert.Contains("clinic-ios", list.Out);
+        Assert.Contains("com.example.clinic, https://a.example, https://b.example", list.Out);
+        Assert.Contains("isn't an SDK", (await Run(null, "apps:create", "X", "--sdk", "swift")).Err);
+        Assert.Contains("There's already an app clinic-ios", (await Run(null, "apps:create", "Again", "--id", "clinic-ios")).Err);
+    }
+
+    [Fact]
+    public async Task Members_are_invited_or_given_a_role_in_the_first_project()
+    {
+        await SetupAsync();
+        var invited = await Run(null, "members:add", "dave@example.com", "--role", "viewer");
+        Assert.True(invited.Exit == 0, invited.Err);
+        Assert.Contains("Invited dave@example.com as Viewer", invited.Out);
+        Assert.Contains("/invite?token=", invited.Out);   // no email here: the link to pass on
+        Assert.Contains("A pending invite already exists", (await Run(null, "members:add", "dave@example.com")).Err);
+        Assert.Equal(2, (await Run(null, "members:add", "x@example.com", "--role", "Owner")).Exit);
+
+        // Someone with an account (and no role) gets one.
+        using var admin = _app.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
+        (await admin.PostAsJsonAsync("/_console/api/auth/login", new { email = "ann@example.com", password = Password })).EnsureSuccessStatusCode();
+        (await admin.PostAsJsonAsync("/_console/api/users", new { email = "erin@example.com", role = "Viewer", password = Password })).EnsureSuccessStatusCode();
+        Assert.Contains("erin@example.com is now Member here", (await Run(null, "members:add", "erin@example.com")).Out);
+        var members = await Run(null, "members");
+        Assert.Contains("ann@example.com", members.Out);
+        Assert.Matches(@"erin@example\.com\s+Member", members.Out);
+        Assert.Matches(@"dave@example\.com\s+Viewer \(invited\)", members.Out);
+    }
+
+    [Fact]
     public async Task Tokens_quiet_prints_only_the_token_even_with_a_named_project()
     {
         await SetupAsync();

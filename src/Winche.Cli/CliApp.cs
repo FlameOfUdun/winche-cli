@@ -37,6 +37,12 @@ internal static partial class CliApp
           projects             The projects on the console's Winche Server that you can use
           projects:create <id> Make a project (server admins; --name, and --db-name/--db-host/--db-port/--db-user/
                                --db-ssl with WINCHE_DB_PASSWORD for a database elsewhere)
+          apps                 The project's registered apps
+          apps:create <name>   Register an app (--id, --sdk flutter, --android-package, --apple-bundle-id,
+                               --web-origin, comma-separated); then winche configure --app <id>
+          members              Who can use the project, and as what
+          members:add <email>  Add someone (--role Admin|Member|Viewer, default Member); new people get a link
+                               to set their password (emailed when the server can send email)
           products             The project's products, and whether they're started
           products:start <p>…  Start products (database, storage, authentication, functions) and follow their setup
           tokens:list          The project's CI tokens
@@ -130,6 +136,10 @@ internal static partial class CliApp
                 "2fa enable" => await run.TwoFactorEnableAsync(ct),
                 "projects:create" => await run.ProjectsCreateAsync(a.Positional.ElementAtOrDefault(1), ct),
                 "products" => await run.ProductsAsync(ct),
+                "apps" => await run.AppsListAsync(ct),
+                "apps:create" => await run.AppsCreateAsync(a.Positional.ElementAtOrDefault(1), ct),
+                "members" => await run.MembersListAsync(ct),
+                "members:add" => await run.MembersAddAsync(a.Positional.ElementAtOrDefault(1), ct),
                 "products:start" => await run.ProductsStartAsync(a.Positional.Skip(1).ToList(), ct),
                 "tokens:list" => await run.TokensListAsync(ct),
                 "tokens:create" => await run.TokensCreateAsync(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche tokens:create <name> --scopes functions,rules,indexes [--days 90]", 2), ct),
@@ -499,7 +509,7 @@ internal static partial class CliApp
             env.Out.WriteLine($"Wrote {Path.GetRelativePath(env.WorkingDirectory, target)} for project {setup.ProjectId} at {setup.BaseUrl}");
             env.Out.WriteLine(setup.App is { } registered
                 ? $"  app:       {registered.Name} ({registered.Id})"
-                : "  app:       none (register the app in the console, then run this again with --app <its id>)");
+                : "  app:       none (register it: winche apps:create <name>, then run this again with --app <its id>)");
             env.Out.WriteLine($"  platforms: {string.Join(", ", platforms)}");
             env.Out.WriteLine($"  services:  {(setup.Services.Count == 0 ? "none" : string.Join(", ", setup.Services.Select(s => s.Id)))}");
             if (setup.Providers.Where(p => p.ClientIds.Count > 1).Select(p => p.Name).ToList() is { Count: > 0 } several)
@@ -1095,7 +1105,8 @@ internal sealed class Args
 {
     private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose", "reauth", "no-browser"];
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
-        "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl"];
+        "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
+        "role", "sdk", "android-package", "apple-bundle-id", "web-origin"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project" };
 
     public List<string> Positional { get; } = [];

@@ -31,6 +31,8 @@ winche rules pull                                        # write the live rules 
 winche projects                                          # the projects on the console's Winche Server
 winche projects:create wards --name Wards                # another project (server admins)
 winche products:start database storage                   # start products, following their setup
+winche apps:create "Clinic iOS" --apple-bundle-id com.example.clinic   # register an app (also: winche apps)
+winche members:add ann@example.com --role Member         # give someone access (also: winche members)
 winche settings pull                                     # the project's settings into settings/*.json (also diff, deploy)
 winche tokens:create gitlab-main --scopes rules,indexes  # a CI token (also tokens:list, tokens:revoke)
 winche indexes deploy -m "why"                           # database.indexes to the console (also diff, pull)
@@ -60,6 +62,8 @@ winche setup --url https://api.example.com --code "$(docker compose logs winche 
   --email ann@example.com --id clinic --name Clinic   # the admin account (signed in here) and the first project
 winche 2fa enable                                      # an authenticator app: changing settings needs it by default
 winche products:start database storage authentication
+winche apps:create "Clinic" --id clinic-app --android-package com.example.clinic --apple-bundle-id com.example.clinic
+winche members:add bob@example.com --role Member
 winche init --console https://api.example.com/_console
 winche settings pull                                   # settings/database.json, storage.json, auth.json, webhooks.json, …
 ```
@@ -83,6 +87,14 @@ winche settings pull                                   # settings/database.json,
       "do": { "kind": "webhook", "url": "https://example.com/hooks/users" }
   } ] }
   ```
+- **Apps:** `winche apps:create <name>` registers an app (`--id`, `--android-package`, `--apple-bundle-id`,
+  `--web-origin a,b`; Flutter is the only SDK so far), and prints the `winche configure --app <id>` to run in its
+  folder. `winche apps` lists them.
+- **Members:** `winche members:add <email> --role Admin|Member|Viewer` (Member by default). In a project made with
+  `projects:create`, they become its member; someone new gets an account and a link to set its password. The first
+  project goes by the accounts' own roles: someone new is invited with that role, an existing account is given it
+  (Admin there is a server admin). Links are emailed when the server can send email, else printed to pass on.
+  `winche members` lists who has access.
 - **CI tokens:** `winche tokens:create <name> --scopes functions,rules,indexes [--days 90]` shows the token once
   (`--quiet`: only the token, for scripts). `tokens:list`, `tokens:revoke <id or name>`. A CI token can't make tokens.
 - **No browser here** (an SSH session, a server): `winche login --no-browser` shows a code and an address. Open it on

@@ -230,6 +230,117 @@ internal static partial class CliApp
             return failed ? 1 : 0;
         }
 
+        // ----- apps --------------------------------------------------------------------------------
+
+        /// <summary><c>winche apps</c>: the project's registered apps.</summary>
+        public async Task<int> AppsListAsync(CancellationToken ct)
+        {
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "api/apps/registered", null, ct);
+            if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
+            var apps = body["apps"]?.AsArray() ?? [];
+            if (apps.Count == 0) env.Out.WriteLine("No apps registered. Register one: winche apps:create <name> --android-package … --apple-bundle-id …");
+            foreach (var a in apps)
+            {
+                var where = new[] { a!["androidPackage"]?.ToString(), a["appleBundleId"]?.ToString() }
+                    .Concat(a["webOrigins"]?.AsArray().Select(o => o?.ToString()) ?? []).Where(x => !string.IsNullOrEmpty(x));
+                env.Out.WriteLine($"  {a["id"],-24} {a["name"],-20} {a["sdk"],-8} {string.Join(", ", where)}");
+            }
+            if (body["registeredOnly"]?.GetValue<bool>() == true) env.Out.WriteLine("Only registered apps may call this project.");
+            return 0;
+        }
+
+        /// <summary><c>winche apps:create &lt;name&gt;</c>: registers an app, then <c>winche configure --app &lt;id&gt;</c> writes its options.</summary>
+        public async Task<int> AppsCreateAsync(string? name, CancellationToken ct)
+        {
+            name = Ask("App name", name, option: "the name: winche apps:create <name>");
+            var origins = (args.Value("web-origin") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var request = new
+            {
+                name, id = args.Value("id"), sdk = args.Value("sdk") ?? "flutter",
+                androidPackage = args.Value("android-package"), appleBundleId = args.Value("apple-bundle-id"), webOrigins = origins,
+            };
+            var client = await ClientAsync(ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Post, "api/apps/registered", request, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Not registered: {ConsoleClient.ErrorText(body, status)}");
+            var id = body["id"]!.GetValue<string>();
+            var server = ConsoleUrl().GetLeftPart(UriPartial.Authority);
+            var project = Target().Url.AbsolutePath.Trim('/').Split('/') is ["p", var p, ..] ? $" --project {p}" : "";
+            env.Out.WriteLine($"Registered the app {name} ({id}).");
+            env.Out.WriteLine($"In the app's folder: winche configure --url {server}{project} --app {id}");
+            return 0;
+        }
+
+        // ----- members -----------------------------------------------------------------------------
+
+        private static readonly string[] Roles = ["Admin", "Member", "Viewer"];
+
+        /// <summary><c>winche members</c>: who can use the project. The first project goes by the accounts' own roles.</summary>
+        public async Task<int> MembersListAsync(CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Get, "api/members", null, ct);
+            if (status == HttpStatusCode.OK)
+            {
+                foreach (var a in body["serverAdmins"]?.AsArray() ?? []) env.Out.WriteLine($"  {a!["email"],-32} Admin (server admin)");
+                foreach (var m in body["members"]?.AsArray() ?? [])
+                    env.Out.WriteLine($"  {m!["email"],-32} {m["role"]}{(m["passwordSet"]?.GetValue<bool>() == false ? " (hasn't set a password yet)" : "")}");
+                return 0;
+            }
+            if (status is not (HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)) throw new CliException(ConsoleClient.ErrorText(body, status));
+            // The first project: everyone with an account role (and who's invited).
+            foreach (var u in await client.GetListAsync("api/users", ct))
+                if (u?["role"]?.ToString() is { Length: > 0 } accountRole)
+                    env.Out.WriteLine($"  {u["email"],-32} {accountRole}{(accountRole == "Admin" ? " (server admin)" : "")}{(u["active"]?.GetValue<bool>() == false ? " (turned off)" : "")}");
+            foreach (var i in await client.GetListAsync("api/invites", ct))
+                if (i?["status"]?.ToString() == "pending") env.Out.WriteLine($"  {i["email"],-32} {i["role"]} (invited)");
+            return 0;
+        }
+
+        /// <summary>
+        /// <c>winche members:add &lt;email&gt; [--role Member]</c>. In a created project they become its member (an account is
+        /// made for someone new, with a link to set its password). The first project goes by the accounts' own roles:
+        /// someone new is invited with that role, an existing account gets it (Admin there means a server admin).
+        /// </summary>
+        public async Task<int> MembersAddAsync(string? email, CancellationToken ct)
+        {
+            email = Ask("Their email", email, option: "the email: winche members:add <email>");
+            var role = args.Value("role") is { } r ? Roles.FirstOrDefault(x => string.Equals(x, r, StringComparison.OrdinalIgnoreCase))
+                ?? throw new CliException($"--role {r}: Admin, Member or Viewer.", 2) : "Member";
+            var client = await ClientAsync(ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Post, "api/members", new { email, role }, ct);
+            if (status == HttpStatusCode.OK)
+            {
+                env.Out.WriteLine($"Added {email} as {role}.");
+                Link(body, body["newAccount"]?.GetValue<bool>() == true ? "It's a new account: they set their password with this link" : null);
+                return 0;
+            }
+            // No member list here (404, or 405 where the console's pages take the path): the first project.
+            if (status is not (HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)) throw new CliException($"Not added: {ConsoleClient.ErrorText(body, status)}");
+
+            // The first project: the account's own role.
+            var list = await client.GetListAsync("api/users", ct);
+            var existing = list.FirstOrDefault(u => string.Equals(u?["email"]?.ToString(), email, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                (status, body) = await client.SendAsync(HttpMethod.Put, $"api/users/{existing["id"]}", new { role }, ct);
+                if (status != HttpStatusCode.OK) throw new CliException($"Not changed: {ConsoleClient.ErrorText(body, status)}");
+                env.Out.WriteLine($"{email} is now {role} here{(role == "Admin" ? " (in the first project, that's a server admin)" : "")}.");
+                return 0;
+            }
+            (status, body) = await client.SendAsync(HttpMethod.Post, "api/invites", new { email, role, expiresInHours = 168, requireName = false, requireTwoFactor = false }, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Not invited: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine($"Invited {email} as {role}{(role == "Admin" ? " (in the first project, that's a server admin)" : "")}; the invite lasts 7 days.");
+            Link(body, "They accept it with this link");
+            return 0;
+        }
+
+        /// <summary>A link to pass on by hand, unless the server emailed it.</summary>
+        private void Link(JsonObject body, string? what)
+        {
+            if (body["emailed"]?.GetValue<bool>() == true) { env.Out.WriteLine("They've been emailed."); return; }
+            if (what is not null && body["link"]?.ToString() is { Length: > 0 } link) env.Out.WriteLine($"{what} (the server can't send email, so pass it on): {link}");
+        }
+
         // ----- CI tokens ---------------------------------------------------------------------------
 
         public async Task<int> TokensListAsync(CancellationToken ct)

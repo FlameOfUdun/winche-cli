@@ -126,6 +126,24 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         }
     }
 
+    /// <summary>GETs a JSON list (<c>api/users</c>, <c>api/invites</c>): its items, or the refusal.</summary>
+    public async Task<System.Text.Json.Nodes.JsonArray> GetListAsync(string path, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(console, path));
+        if (token.Length > 0) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        HttpResponseMessage response;
+        try { response = await http.SendAsync(request, ct); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        using (response)
+        {
+            var text = await response.Content.ReadAsStringAsync(ct);
+            if (response.StatusCode == HttpStatusCode.Unauthorized) throw Refused();
+            if (!response.IsSuccessStatusCode) throw new CliException(ErrorText((text.Length > 0 ? TryNode(text) : null) ?? [], response.StatusCode));
+            try { return System.Text.Json.Nodes.JsonNode.Parse(text) as System.Text.Json.Nodes.JsonArray ?? []; }
+            catch (JsonException) { return []; }
+        }
+    }
+
     /// <summary>A 401: a CI token that may not do this (or was revoked, or expired), or a sign-in that has ended.</summary>
     private CliException Refused() => token.StartsWith("wct_", StringComparison.Ordinal)
         ? new CliException("The CI token was refused: a CI token only deploys what its scopes allow (functions, rules, indexes), and stops once revoked or expired.")
