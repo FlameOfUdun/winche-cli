@@ -79,7 +79,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
             switch (response.StatusCode)
             {
                 case HttpStatusCode.Unauthorized:
-                    throw new CliException($"Not signed in to {console} (or the session ended). Run: winche login");
+                    throw Refused();
                 case HttpStatusCode.Forbidden:
                     throw new CliException("Your account can't manage rules: it needs the console's Admin role.");
                 case HttpStatusCode.NotFound when notFound is not null && await HasSubsystemAsync(subsystem, ct):
@@ -120,11 +120,16 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         using (response)
         {
             var text = await response.Content.ReadAsStringAsync(ct);
-            if (response.StatusCode == HttpStatusCode.Unauthorized) throw new CliException($"Not signed in to {console} (or the session ended). Run: winche login");
+            if (response.StatusCode == HttpStatusCode.Unauthorized) throw Refused();
             if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{console}: this project is archived.");
             return (response.StatusCode, (text.Length > 0 ? TryNode(text) : null) ?? []);
         }
     }
+
+    /// <summary>A 401: a CI token that may not do this (or was revoked, or expired), or a sign-in that has ended.</summary>
+    private CliException Refused() => token.StartsWith("wct_", StringComparison.Ordinal)
+        ? new CliException("The CI token was refused: a CI token only deploys what its scopes allow (functions, rules, indexes), and stops once revoked or expired.")
+        : new CliException($"Your sign-in to {console} was refused: it has ended (signed out, everywhere too, or the account was turned off). Run: winche login");
 
     /// <summary>What a refusal says: its message, and its list of problems.</summary>
     public static string ErrorText(System.Text.Json.Nodes.JsonObject body, HttpStatusCode status)
@@ -153,8 +158,10 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         using (response)
         {
             var text = await response.Content.ReadAsStringAsync(ct);
-            if (response.StatusCode == HttpStatusCode.Unauthorized) throw new CliException($"Not signed in to {console} (or the session ended). Run: winche login");
+            if (response.StatusCode == HttpStatusCode.Unauthorized) throw Refused();
             if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{console}: this project is archived.");
+            if (response.StatusCode == HttpStatusCode.Forbidden)
+                throw new CliException("Your account can't see this here: it has no role in this project (or not enough). See your projects: winche projects");
             if (!response.IsSuccessStatusCode) throw new CliException($"The console answered {(int)response.StatusCode} {response.ReasonPhrase}.");
             return System.Text.Json.Nodes.JsonNode.Parse(text) as System.Text.Json.Nodes.JsonObject ?? throw new CliException("The console sent an unreadable response.");
         }
@@ -185,7 +192,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
             switch (response.StatusCode)
             {
                 case HttpStatusCode.Unauthorized:
-                    throw new CliException($"Not signed in to {console} (or the sign-in or token ended). Run: winche login");
+                    throw Refused();
                 case HttpStatusCode.Forbidden when TwoFactor(json):
                     throw new CliException("Turn on two-step sign-in for your console account first (your account menu in the console).");
                 case HttpStatusCode.Forbidden:

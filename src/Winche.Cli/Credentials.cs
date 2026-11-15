@@ -92,13 +92,13 @@ internal sealed class CredentialStore(string directory)
         return true;
     }
 
-    /// <summary>Forgets <paramref name="user"/>'s sign-in there; the next one becomes active.</summary>
-    public void Remove(Uri console, string user)
+    /// <summary>Forgets <paramref name="user"/>'s sign-in there; the next one becomes active (unless <paramref name="chooseNext"/> is false).</summary>
+    public void Remove(Uri console, string user, bool chooseNext = true)
     {
         var all = Load();
         if (!all.Servers.TryGetValue(Key(console), out var s)) return;
         s.Accounts.Remove(user);
-        if (string.Equals(s.Active, user, StringComparison.OrdinalIgnoreCase)) s.Active = s.Accounts.Keys.FirstOrDefault();
+        if (string.Equals(s.Active, user, StringComparison.OrdinalIgnoreCase)) s.Active = chooseNext ? s.Accounts.Keys.FirstOrDefault() : null;
         if (s.Accounts.Count == 0) all.Servers.Remove(Key(console));
         Save(all);
     }

@@ -250,6 +250,45 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         Assert.Contains("one project", made.Err);
     }
 
+    [Fact]
+    public async Task Tokens_quiet_prints_only_the_token_even_with_a_named_project()
+    {
+        await SetupAsync();
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), $$"""{ "console": "{{Url}}", "projects": { "main": "{{Url}}" }, "rules": {} }""");
+        var made = await Run(null, "tokens:create", "ci", "--scopes", "rules", "--quiet");
+        Assert.True(made.Exit == 0, made.Err);
+        Assert.Matches(@"^wct_\S+\n$", made.Out.Replace("\r", ""));
+        // A pasted token with a line break in it is refused plainly.
+        _vars["WINCHE_TOKEN"] = made.Out.Trim() + "\nProject: main";
+        var bad = await Run(null, "rules", "history");
+        Assert.Equal(2, bad.Exit);
+        Assert.Contains("more than one line", bad.Err);
+    }
+
+    [Fact]
+    public async Task Configure_reads_the_named_projects_own_setup()
+    {
+        var seen = new List<string>();
+        var handler = new Recording(seen, """{ "projectId": "wards", "name": "Wards", "baseUrl": "http://api.example.com/p/wards", "services": [], "providers": [], "app": null }""");
+        var env = new CliEnvironment
+        {
+            Out = new StringWriter(), Error = new StringWriter(), WorkingDirectory = _dir, ConfigDirectory = _configDir,
+            GetVariable = _ => null, Http = handler, OpenBrowser = _ => { },
+        };
+        File.WriteAllText(Path.Combine(_dir, "pubspec.yaml"), "name: demo\n");
+        Assert.Equal(0, await CliApp.RunAsync(["configure", "--url", "http://api.example.com", "--project", "wards"], env));
+        Assert.Contains("/p/wards/.well-known/winche", seen);
+    }
+
+    private sealed class Recording(List<string> seen, string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            seen.Add(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") });
+        }
+    }
+
     /// <summary>The 6-digit code an authenticator shows now for <paramref name="base32"/> (RFC 6238).</summary>
     private static string Totp(string base32)
     {

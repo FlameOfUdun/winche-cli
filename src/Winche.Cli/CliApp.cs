@@ -464,7 +464,7 @@ internal static partial class CliApp
             try
             {
                 var appId = args.Value("app");
-                using var response = await http.GetAsync(new Uri(server, "/.well-known/winche" + (appId is null ? "" : $"?app={Uri.EscapeDataString(appId)}")), ct);
+                using var response = await http.GetAsync(new Uri(server.ToString().TrimEnd('/') + "/.well-known/winche" + (appId is null ? "" : $"?app={Uri.EscapeDataString(appId)}")), ct);
                 if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
                     var body = await response.Content.ReadAsStringAsync(ct);
@@ -612,11 +612,14 @@ internal static partial class CliApp
         /// </summary>
         public async Task<int> LoginAsync(bool add, CancellationToken ct)
         {
-            var console = ConsoleUrl();
+            var console = ServerConsole();
             var server = CredentialStore.ServerOf(console);
             var store = new CredentialStore(env.ConfigDirectory);
-            if (!add && !args.Flag("reauth") && store.Active(console) is { } signedIn)
+            // Signed in already, as long as the server still has the session (renewing it says so): else sign in again.
+            if (!add && !args.Flag("reauth") && store.Active(console) is { } signedIn
+                && await new ConsoleLogin(env, http).StillLiveAsync(server, signedIn, ct) is { } live)
             {
+                if (!ReferenceEquals(live, signedIn)) store.Put(console, live);
                 env.Out.WriteLine($"Already signed in to {CredentialStore.Key(console)} as {signedIn.User}.");
                 env.Out.WriteLine("winche login --reauth signs in again; winche login:add adds another account.");
                 return 0;
@@ -629,7 +632,9 @@ internal static partial class CliApp
                 ? await new ConsoleLogin(env, http).DeviceLoginAsync(server, ct)
                 : await new ConsoleLogin(env, http).LoginAsync(server, port, ct);
             var use = !add || store.Active(console) is null;
+            var replaced = store.Server(console)?.Accounts.GetValueOrDefault(login.User);
             store.Put(console, login, use);
+            if (replaced is not null) await new ConsoleLogin(env, http).LogoutAsync(server, replaced, ct);   // --reauth: the old session ends
             env.Out.WriteLine($"Signed in to {CredentialStore.Key(console)} as {login.User}{(use ? "" : $" (still using {store.Active(console)?.User}: winche login:use {login.User})")}.");
             return 0;
         }
@@ -655,7 +660,7 @@ internal static partial class CliApp
         /// <summary><c>winche login:use &lt;email&gt;</c>: the account commands use on this server.</summary>
         public int LoginUse(string user)
         {
-            var console = ConsoleUrl();
+            var console = ServerConsole();
             if (!new CredentialStore(env.ConfigDirectory).Use(console, user))
                 throw new CliException($"{user} isn't signed in to {CredentialStore.Key(console)}. Run: winche login:add");
             env.Out.WriteLine($"Using {user} on {CredentialStore.Key(console)}.");
@@ -665,7 +670,7 @@ internal static partial class CliApp
         /// <summary><c>winche logout [&lt;email&gt;]</c>: ends one account's sign-in there, or (none named) every one.</summary>
         public async Task<int> LogoutAsync(string? user, CancellationToken ct)
         {
-            var console = ConsoleUrl();
+            var console = ServerConsole();
             var server = CredentialStore.ServerOf(console);
             var store = new CredentialStore(env.ConfigDirectory);
             var signedIn = store.Server(console)?.Accounts ?? [];
@@ -681,6 +686,10 @@ internal static partial class CliApp
                 store.Remove(console, u);
                 env.Out.WriteLine($"Signed {u} out of {CredentialStore.Key(console)}.");
             }
+            if (store.Active(console) is { } next && leaving.Count < signedIn.Count)
+            {
+                env.Out.WriteLine($"Now using {next.User} there (winche login:use to change).");
+            }
             return 0;
         }
 
@@ -691,15 +700,19 @@ internal static partial class CliApp
         {
             if (url is not null)
             {
-                var direct = args.Value("token") ?? env.GetVariable("WINCHE_TOKEN");
+                var direct = (args.Value("token") ?? env.GetVariable("WINCHE_TOKEN"))?.Trim();
+                if (direct is not null && direct.Any(char.IsWhiteSpace))
+                    throw new CliException("The token has spaces or more than one line in it: set WINCHE_TOKEN (or --token) to the token alone.", 2);
                 if (string.IsNullOrWhiteSpace(direct))
                     direct = await SignedInTokenAsync(env, http, url, ct) ?? throw new CliException($"Not signed in to {CredentialStore.Key(url)}. Run: winche login");
                 return new ConsoleClient(http, url, direct);
             }
             var target = Target();
             var console = target.Url;
-            if (target.Alias is not null) env.Out.WriteLine($"Project: {target.Describe()}");
-            var token = args.Value("token") ?? env.GetVariable("WINCHE_TOKEN");
+            if (target.Alias is not null && !args.Flag("quiet")) env.Out.WriteLine($"Project: {target.Describe()}");
+            var token = (args.Value("token") ?? env.GetVariable("WINCHE_TOKEN"))?.Trim();
+            if (token is not null && token.Any(char.IsWhiteSpace))
+                throw new CliException("The token has spaces or more than one line in it: set WINCHE_TOKEN (or --token) to the token alone.", 2);
             if (string.IsNullOrWhiteSpace(token))
                 token = await SignedInTokenAsync(env, http, console, ct)
                         ?? throw new CliException($"Not signed in to {CredentialStore.Key(console)}. Run: winche login");
@@ -717,8 +730,10 @@ internal static partial class CliApp
             var fresh = await new ConsoleLogin(env, http).FreshAsync(CredentialStore.ServerOf(console), saved, ct);
             if (fresh is null)
             {
-                store.Remove(console, saved.User);
-                throw new CliException($"Your sign-in to {CredentialStore.Key(console)} as {saved.User} has ended. Run: winche login");
+                store.Remove(console, saved.User, chooseNext: false);   // never carry on as someone else unasked
+                var others = store.Server(console)?.Accounts.Keys.ToList() ?? [];
+                throw new CliException($"Your sign-in to {CredentialStore.Key(console)} as {saved.User} has ended. Run: winche login" +
+                    (others.Count > 0 ? $" (or winche login:use {others[0]})" : ""));
             }
             if (!ReferenceEquals(fresh, saved)) store.Put(console, fresh);
             return fresh.AccessToken;

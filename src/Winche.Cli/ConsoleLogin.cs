@@ -27,7 +27,7 @@ internal sealed class ConsoleLogin(CliEnvironment env, HttpClient http)
         var challenge = WincheBase64Url.Encode(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
         var state = WincheBase64Url.Encode(RandomNumberGenerator.GetBytes(16));
         var name = Name;
-        var url = new Uri(server, $"cli-login?port={port}&state={state}&challenge={challenge}&name={Uri.EscapeDataString(name)}").ToString();
+        var url = new Uri(server, $"cli-login?port={port}&state={state}&challenge={challenge}&name={Uri.EscapeDataString(name)}").AbsoluteUri;
 
         using var listener = new HttpListener();
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
@@ -57,8 +57,8 @@ internal sealed class ConsoleLogin(CliEnvironment env, HttpClient http)
         var interval = TimeSpan.FromSeconds(Math.Max(1, started["interval"]?.GetValue<int>() ?? 2));
         var until = env.Time.GetUtcNow().AddSeconds(started["expiresIn"]?.GetValue<int>() ?? 600);
 
-        env.Out.WriteLine($"On any device, open {new Uri(server, "cli-login?user_code=" + userCode)}");
-        env.Out.WriteLine($"(or {new Uri(server, "cli-login")} and enter the code), sign in, and allow the CLI. Your code: {userCode}");
+        env.Out.WriteLine($"On any device, open {new Uri(server, "cli-login?user_code=" + userCode).AbsoluteUri}");
+        env.Out.WriteLine($"(or {new Uri(server, "cli-login").AbsoluteUri} and enter the code), sign in, and allow the CLI. Your code: {userCode}");
         env.Out.WriteLine("Waiting…");
         while (true)
         {
@@ -110,6 +110,10 @@ internal sealed class ConsoleLogin(CliEnvironment env, HttpClient http)
         if (login.ExpiresAt > env.Time.GetUtcNow().AddMinutes(1)) return login;
         return await SessionAsync(server, "api/cli-login/refresh", new { refreshToken = login.RefreshToken, name = Name }, "Renewing your sign-in failed", ct);
     }
+
+    /// <summary>The login renewed (so the server confirms its session is live), or null when it has ended.</summary>
+    public Task<SavedLogin?> StillLiveAsync(Uri server, SavedLogin login, CancellationToken ct) =>
+        SessionAsync(server, "api/cli-login/refresh", new { refreshToken = login.RefreshToken, name = Name }, "Checking your sign-in failed", ct);
 
     /// <summary>Ends the session at the server (offline: it's just forgotten here).</summary>
     public async Task LogoutAsync(Uri server, SavedLogin login, CancellationToken ct)

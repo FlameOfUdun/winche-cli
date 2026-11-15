@@ -74,6 +74,15 @@ winche settings pull                                   # settings/database.json,
   (`--dry-run` to see the changes; `--only auth,webhooks`). A file changed on the server since is refused, not
   overwritten. Secrets stay on the server: the SMTP password, webhook signing secrets, a bucket's keys and the
   server's own settings are set in the console. Indexes and expiry are `database.indexes`, not `database.json`.
+- **A webhook** in `settings/webhooks.json` (each gets its signing secret on the server when first saved):
+
+  ```json
+  { "hooks": [ {
+      "id": "new-users", "name": "New users", "enabled": true,
+      "when": { "source": "database", "events": ["created"], "path": "users/{uid}" },
+      "do": { "kind": "webhook", "url": "https://example.com/hooks/users" }
+  } ] }
+  ```
 - **CI tokens:** `winche tokens:create <name> --scopes functions,rules,indexes [--days 90]` shows the token once
   (`--quiet`: only the token, for scripts). `tokens:list`, `tokens:revoke <id or name>`. A CI token can't make tokens.
 - **No browser here** (an SSH session, a server): `winche login --no-browser` shows a code and an address. Open it on

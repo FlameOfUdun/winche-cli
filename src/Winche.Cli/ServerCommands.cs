@@ -15,11 +15,11 @@ internal static partial class CliApp
         // ----- prompts -----------------------------------------------------------------------------
 
         /// <summary><paramref name="given"/>, or asked for (or <paramref name="fallback"/> when nobody can answer, or the answer's empty).</summary>
-        private string Ask(string label, string? given, string? fallback = null)
+        private string Ask(string label, string? given, string? fallback = null, string? option = null)
         {
             if (!string.IsNullOrWhiteSpace(given)) return given.Trim();
             if (!env.Interactive)
-                return fallback ?? throw new CliException($"{label}: pass it as an option (see winche --help); there's no terminal to ask in.", 2);
+                return fallback ?? throw new CliException($"{label}: pass {option ?? "it as an option (see winche --help)"}; there's no terminal to ask in.", 2);
             env.Out.Write(fallback is { Length: > 0 } ? $"{label} [{fallback}]: " : $"{label}: ");
             var answer = env.In.ReadLine()?.Trim();
             if (string.IsNullOrEmpty(answer)) return fallback ?? throw new CliException($"{label} is needed.", 2);
@@ -90,8 +90,8 @@ internal static partial class CliApp
 
             if (store.Active(console) is null)
             {
-                var code = args.Value("code") ?? env.GetVariable("WINCHE_SETUP_CODE") ?? Ask("Setup code (the server's log: \"Setup code: …\")", null);
-                var email = Ask("Your email", args.Value("email"));
+                var code = args.Value("code") ?? env.GetVariable("WINCHE_SETUP_CODE") ?? Ask("Setup code (the server's log: \"Setup code: …\")", null, option: "--code (or set WINCHE_SETUP_CODE)");
+                var email = Ask("Your email", args.Value("email"), option: "--email");
                 var first = Ask("First name", args.Value("first-name"), "");
                 var last = Ask("Last name", args.Value("last-name"), "");
                 var password = AskSecret("Password", "WINCHE_ADMIN_PASSWORD", confirm: true);
@@ -109,7 +109,7 @@ internal static partial class CliApp
             var project = await client.GetJsonAsync("api/project", ct);
             if (project["created"]?.GetValue<bool>() != true)
             {
-                var id = Ask("Project id (lower-case letters, digits and dashes)", args.Value("id"));
+                var id = Ask("Project id (lower-case letters, digits and dashes)", args.Value("id"), option: "--id");
                 var name = Ask("Project name", args.Value("name"), id);
                 var products = Products(args.Value("products"));
                 var (status, body) = await client.SendAsync(HttpMethod.Post, "api/project", new { name, id, products, database = DatabaseTarget() }, ct);
@@ -152,7 +152,7 @@ internal static partial class CliApp
             env.Out.WriteLine($"  Key: {started["sharedKey"]}");
             for (var attempt = 1; ; attempt++)
             {
-                var code = Ask("The 6-digit code it shows", args.Value("code"));
+                var code = Ask("The 6-digit code it shows", args.Value("code"), option: "--code");
                 var (ok, body) = await client.SendAsync(HttpMethod.Post, "api/auth/2fa/enable", new { code }, ct);
                 if (ok == HttpStatusCode.OK)
                 {
@@ -171,7 +171,7 @@ internal static partial class CliApp
         public async Task<int> ProjectsCreateAsync(string? id, CancellationToken ct)
         {
             var console = ServerConsole();
-            id = Ask("Project id (lower-case letters, digits and dashes)", id);
+            id = Ask("Project id (lower-case letters, digits and dashes)", id, option: "the id: winche projects:create <id>");
             var name = Ask("Project name", args.Value("name"), id);
             var client = await ClientAsync(console, ct);
             var (status, body) = await client.SendAsync(HttpMethod.Post, "api/projects", new { name, id, database = DatabaseTarget() }, ct);
