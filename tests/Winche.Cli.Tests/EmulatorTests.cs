@@ -204,7 +204,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         Assert.Contains("projectId: 'clinic',", dart);
         Assert.Contains($"baseUrl: Uri.parse('{host.BaseUrl.TrimEnd('/')}'),", dart);
         Assert.Contains("services:  database, storage, auth, functions", stdout.ToString());
-        Assert.Contains("No app id: register the app in the console", dart);
+        Assert.Contains("No app id: register the app (`winche apps:create <name>`", dart);
         Assert.Contains("app:       none", stdout.ToString());
 
         // The emulators keep no list of apps: an app id is written as given.

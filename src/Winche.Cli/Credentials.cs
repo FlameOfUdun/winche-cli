@@ -21,8 +21,7 @@ internal sealed class ServerLogins
 
 /// <summary>
 /// <c>credentials.json</c> in the config directory: sign-ins by server (one for all its projects, as accounts are the
-/// server's), each with its accounts and the active one. Readable by the user only (mode 600 on Unix), like the
-/// Firebase CLI's.
+/// server's), each with its accounts and the active one. Readable by the user only (mode 600 on Unix).
 /// </summary>
 internal sealed class CredentialStore(string directory)
 {

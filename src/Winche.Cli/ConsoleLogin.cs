@@ -7,7 +7,7 @@ using System.Text.Json.Nodes;
 namespace Winche.Cli;
 
 /// <summary>
-/// Signs in to a Winche Server, like <c>firebase login</c>: opens the server's console in the browser, where you sign in
+/// Signs in to a Winche Server: opens the server's console in the browser, where you sign in
 /// (a password or your company sign-in) and allow the CLI; the browser comes back to <c>http://127.0.0.1:{port}/callback</c>
 /// with a one-time code, which the CLI trades (with its PKCE verifier) for a session of your account. Its access token
 /// is renewed with its refresh token as it runs out; the session is one of your account's like any other, so signing

@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Winche.Cli;
 
 /// <summary>
-/// <c>winche.json</c>, found in the working directory or the nearest parent (like <c>firebase.json</c>):
+/// <c>winche.json</c>, found in the working directory or the nearest parent:
 /// <code>
 /// {
 ///   "console": "https://api.example.com/_console",
@@ -152,7 +152,7 @@ internal sealed record ConsoleTarget(Uri Url, string? Alias)
 
 /// <summary>
 /// The project chosen with <c>winche use</c> for each checkout (by its winche.json path), kept on this machine in
-/// <c>active-projects.json</c> next to the credentials — like the Firebase CLI's active project.
+/// <c>active-projects.json</c> next to the credentials.
 /// </summary>
 internal static class ActiveProjects
 {

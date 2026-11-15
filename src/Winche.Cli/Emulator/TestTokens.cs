@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 namespace Winche.Cli.Emulator;
 
 /// <summary>
-/// The emulator's sign-in: any JWT, signature not checked (Firebase's emulators work the same way). Its claims
+/// The emulator's sign-in: any JWT, signature not checked (it's a local emulator). Its claims
 /// become the caller's, with <c>uid</c> taken from <c>uid</c>, else <c>sub</c>, else <c>user_id</c>.
 /// <c>winche emulators token</c> mints unsigned ones.
 /// </summary>
