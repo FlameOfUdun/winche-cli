@@ -14,7 +14,8 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         [property: JsonPropertyName("isActive")] bool IsActive,
         [property: JsonPropertyName("note")] string? Note,
         [property: JsonPropertyName("createdAtUtc")] DateTimeOffset CreatedAtUtc,
-        [property: JsonPropertyName("createdBy")] string? CreatedBy);
+        [property: JsonPropertyName("createdBy")] string? CreatedBy,
+        [property: JsonPropertyName("revertedFromVersion")] int? RevertedFromVersion = null);
 
     internal sealed record VersionDetail(
         [property: JsonPropertyName("version")] int Version,
@@ -44,11 +45,18 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
     public async Task<string> GetLiveAsync(string subsystem, CancellationToken ct) =>
         (await SendAsync<RulesJsonBody>(HttpMethod.Get, $"api/rules/{subsystem}/live", null, subsystem, ct))!.RulesJson;
 
+    public async Task<VersionDetail> GetVersionAsync(string subsystem, int version, CancellationToken ct) =>
+        (await SendAsync<VersionDetail>(HttpMethod.Get, $"api/rules/{subsystem}/versions/{version}", null, subsystem, ct, $"{subsystem} has no version {version}."))!;
+
+    /// <summary>Makes <paramref name="version"/> active again, as a new version (like the console's Revert).</summary>
+    public async Task<VersionDetail> RevertAsync(string subsystem, int version, CancellationToken ct) =>
+        (await SendAsync<VersionDetail>(HttpMethod.Post, $"api/rules/{subsystem}/revert/{version}", null, subsystem, ct, $"{subsystem} has no version {version}."))!;
+
     public async Task<VersionDetail> SaveAsync(string subsystem, string rulesJson, string note, int? expectedHead, CancellationToken ct) =>
         (await SendAsync<VersionDetail>(HttpMethod.Post, $"api/rules/{subsystem}",
             new { rulesJson, note, expectedHeadVersion = expectedHead }, subsystem, ct))!;
 
-    private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, string subsystem, CancellationToken ct)
+    private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, string subsystem, CancellationToken ct, string? notFound = null)
     {
         using var request = new HttpRequestMessage(method, new Uri(console, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -74,6 +82,8 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
                     throw new CliException($"Not signed in to {console} (or the session ended). Run: winche login");
                 case HttpStatusCode.Forbidden:
                     throw new CliException("Your account can't manage rules: it needs the console's Admin role.");
+                case HttpStatusCode.NotFound when notFound is not null && await HasSubsystemAsync(subsystem, ct):
+                    throw new CliException(notFound);
                 case HttpStatusCode.NotFound:
                     throw new CliException(
                         $"The console has no {subsystem} rules editor. Enable it in the host: Add{Title(subsystem)}Tab(b => b.UseRulesEditor()).");
@@ -93,6 +103,118 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
                 throw new CliException($"{console} doesn't look like a Winche console (got {response.Content.Headers.ContentType?.MediaType ?? "no content type"}). Check the URL ends with the console's prefix, e.g. /_console.");
             return TryRead<T>(text) ?? throw new CliException("The console sent an unreadable response.");
         }
+    }
+
+    /// <summary>
+    /// Sends a request and returns its status and JSON answer: only "can't reach it", "not signed in" and "archived"
+    /// throw, so commands say what was refused in their own words (<see cref="ErrorText"/>).
+    /// </summary>
+    public async Task<(HttpStatusCode Status, System.Text.Json.Nodes.JsonObject Body)> SendAsync(HttpMethod method, string path, object? body, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(method, new Uri(console, path));
+        if (body is not null) request.Content = JsonContent.Create(body);
+        if (token.Length > 0) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        HttpResponseMessage response;
+        try { response = await http.SendAsync(request, ct); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        using (response)
+        {
+            var text = await response.Content.ReadAsStringAsync(ct);
+            if (response.StatusCode == HttpStatusCode.Unauthorized) throw new CliException($"Not signed in to {console} (or the session ended). Run: winche login");
+            if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{console}: this project is archived.");
+            return (response.StatusCode, (text.Length > 0 ? TryNode(text) : null) ?? []);
+        }
+    }
+
+    /// <summary>What a refusal says: its message, and its list of problems.</summary>
+    public static string ErrorText(System.Text.Json.Nodes.JsonObject body, HttpStatusCode status)
+    {
+        if (TwoFactor(body)) return "Turn on two-step sign-in for your account first: winche 2fa enable";
+        var error = body["error"];
+        var message = error is System.Text.Json.Nodes.JsonObject e ? e["message"]?.ToString() : error?.ToString();
+        var problems = (error as System.Text.Json.Nodes.JsonObject)?["details"]?["errors"]?.AsArray().Select(x => x?.ToString()).Where(x => x is not null).ToList() ?? [];
+        message ??= status switch
+        {
+            HttpStatusCode.Forbidden => "Your account isn't allowed to do that here (it needs the Admin role).",
+            HttpStatusCode.NotFound => "The server doesn't have that here.",
+            _ => $"The server answered {(int)status} {status}.",
+        };
+        return problems.Count == 0 ? message : message + Environment.NewLine + string.Join(Environment.NewLine, problems.Select(p => "  - " + p));
+    }
+
+    /// <summary>GETs <paramref name="path"/> as JSON; sign-in and role problems throw.</summary>
+    public async Task<System.Text.Json.Nodes.JsonObject> GetJsonAsync(string path, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(console, path));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        HttpResponseMessage response;
+        try { response = await http.SendAsync(request, ct); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        using (response)
+        {
+            var text = await response.Content.ReadAsStringAsync(ct);
+            if (response.StatusCode == HttpStatusCode.Unauthorized) throw new CliException($"Not signed in to {console} (or the session ended). Run: winche login");
+            if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{console}: this project is archived.");
+            if (!response.IsSuccessStatusCode) throw new CliException($"The console answered {(int)response.StatusCode} {response.ReasonPhrase}.");
+            return System.Text.Json.Nodes.JsonNode.Parse(text) as System.Text.Json.Nodes.JsonObject ?? throw new CliException("The console sent an unreadable response.");
+        }
+    }
+
+    /// <summary>
+    /// POSTs <paramref name="body"/> to <paramref name="path"/>; the answer, and whether it succeeded. Sign-in, role and
+    /// reachability problems throw; anything else the console refused comes back for the caller to show.
+    /// </summary>
+    public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PostAsync(string path, object body, string what, CancellationToken ct) =>
+        SendJsonAsync(HttpMethod.Post, path, body, what, ct);
+
+    /// <summary>PUTs <paramref name="body"/>, like <see cref="PostAsync"/>.</summary>
+    public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PutAsync(string path, object body, string what, CancellationToken ct) =>
+        SendJsonAsync(HttpMethod.Put, path, body, what, ct);
+
+    private async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> SendJsonAsync(HttpMethod method, string path, object body, string what, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(method, new Uri(console, path)) { Content = JsonContent.Create(body) };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        HttpResponseMessage response;
+        try { response = await http.SendAsync(request, ct); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        using (response)
+        {
+            var text = await response.Content.ReadAsStringAsync(ct);
+            var json = (text.Length > 0 ? TryNode(text) : null) ?? [];
+            switch (response.StatusCode)
+            {
+                case HttpStatusCode.Unauthorized:
+                    throw new CliException($"Not signed in to {console} (or the sign-in or token ended). Run: winche login");
+                case HttpStatusCode.Forbidden when TwoFactor(json):
+                    throw new CliException("Turn on two-step sign-in for your console account first (your account menu in the console).");
+                case HttpStatusCode.Forbidden:
+                    throw new CliException($"Your account can't deploy {what}: it needs the console's Admin role.");
+                case HttpStatusCode.NotFound:
+                    throw new CliException($"The console doesn't manage {what} (the app has no Add{Title(what)}…).");
+            }
+            return (response.IsSuccessStatusCode, json);
+        }
+    }
+
+    private static bool TwoFactor(System.Text.Json.Nodes.JsonObject json)
+    {
+        var code = json["error"] is System.Text.Json.Nodes.JsonObject e ? e["code"]?.ToString() : json["error"]?.ToString();
+        return code is "TWO_FACTOR_REQUIRED" or "two_factor_setup_required";
+    }
+
+    private static System.Text.Json.Nodes.JsonObject? TryNode(string text)
+    {
+        try { return System.Text.Json.Nodes.JsonNode.Parse(text) as System.Text.Json.Nodes.JsonObject; }
+        catch (JsonException) { return null; }
+    }
+
+    private async Task<bool> HasSubsystemAsync(string subsystem, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(console, $"api/rules/{subsystem}/versions"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await http.SendAsync(request, ct);
+        return response.IsSuccessStatusCode;
     }
 
     private static T? TryRead<T>(string text)

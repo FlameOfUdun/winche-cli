@@ -4,24 +4,33 @@ using Winche.Database.DependencyInjection;
 using Winche.Storage.DependencyInjection;
 using Winche.Storage.Interfaces;
 
-// The console in Keycloak mode with both rules editors, which is what `winche` talks to.
+// What `winche` talks to: the console of a Winche app, with its own accounts (a Winche Auth of their own, as on Winche
+// Server), both rules editors, indexes and the CLI's tokens.
 var builder = WebApplication.CreateBuilder(args);
 var wincheConn = builder.Configuration["Winche:ConnectionString"]
     ?? throw new InvalidOperationException("Winche:ConnectionString is required.");
+var consoleConn = builder.Configuration["Console:ConnectionString"]
+    ?? throw new InvalidOperationException("Console:ConnectionString is required.");
+const string masterKey = "cli-test-host-master-key-0123456789abcdef";
 
-builder.Services.AddWincheDatabase(cfg => cfg.ConnectionString = wincheConn);
-builder.Services.AddWincheStorage(opts => opts.ConnectionString = wincheConn);
+// Settings the console saves (the database's indexes and expiry among them), and the CLI's tokens.
+Winche.Core.ServiceCollectionExtensions.AddWincheConfig(builder.Services, o => { o.ConnectionString = wincheConn; o.MasterKey = masterKey; });
+builder.Services.AddWincheDatabase(cfg => { cfg.ConnectionString = wincheConn; cfg.UseSettings(); });
+builder.Services.AddWincheStorage(opts => { opts.ConnectionString = wincheConn; opts.UseSettings(); });
 builder.Services.AddSingleton<IArchive, NoOpArchive>();
+
+// The console's accounts: their own schema in the console's database.
+await ConsoleAccountsHost.PrepareAsync(consoleConn);
+var accounts = new ConsoleAccountsHost(consoleConn, masterKey);
+builder.Services.AddHostedService(_ => accounts);
 
 builder.Services.AddWincheConsole(o =>
 {
-    o.ConnectionString = builder.Configuration["Console:ConnectionString"];   // the rules editor's version store
-    o.UseKeycloak(k =>
-    {
-        k.Server = builder.Configuration["Keycloak:Server"];
-        k.Realm = builder.Configuration["Keycloak:Realm"];
-        k.ClientId = builder.Configuration["Keycloak:Resource"];
-    });
+    o.ConnectionString = consoleConn;   // the rules editor's version store
+    o.Accounts = accounts;
+    o.RequireTwoFactorForSettings = false;
+    // A new server, as winche setup finds it: no project yet, every product off until started.
+    if (builder.Configuration["TestHost:ProjectSetup"] == "true") o.UseProjectSetup(carryOver: false);
     o.AddDatabaseTab(b => b.UseRulesEditor());
     o.AddStorageTab(b => b.UseRulesEditor());
 });

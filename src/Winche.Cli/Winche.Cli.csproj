@@ -9,13 +9,33 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>winche</ToolCommandName>
     <PackageId>Winche.Cli</PackageId>
-    <PackageDescription>The winche command-line tool: validate access rules locally and deploy them to a Winche console, like the Firebase CLI. Install with: dotnet tool install -g Winche.Cli</PackageDescription>
+    <PackageDescription>The winche command-line tool: set up and use a Winche Server from the terminal, test access rules locally, and deploy rules, indexes, settings and functions. Install with: dotnet tool install -g Winche.Cli</PackageDescription>
     <PackageTags>winche;cli;rules;security-rules;deploy</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Winche.Cli.Tests" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Winche.Rules" Version="4.0.0" />
+    <!-- winche emulators: the database, storage and console in one local process. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Winche.Rules" Version="4.1.0" />
+    <PackageReference Include="Winche.Database.AspNetCore.Rest" Version="11.1.0" />
+    <PackageReference Include="Winche.Database.AspNetCore.WebSockets" Version="11.1.0" />
+    <PackageReference Include="Winche.Storage.AspNetCore.Rest" Version="9.1.0" />
+    <PackageReference Include="Winche.Storage.FileSystem" Version="9.1.0" />
+    <PackageReference Include="Winche.Storage.S3" Version="9.1.0" />
+    <PackageReference Include="Winche.Functions.Database" Version="1.0.0" />
+    <PackageReference Include="Winche.Functions.Storage" Version="1.0.0" />
+    <PackageReference Include="Winche.Functions.Auth" Version="1.0.0" />
+    <PackageReference Include="Winche.Auth.AspNetCore" Version="1.0.0" />
+    <PackageReference Include="Winche.Core" Version="1.0.0" />
+    <PackageReference Include="Winche.Core.AspNetCore" Version="1.0.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.12.0" />
+    <!-- Testcontainers brings SSH.NET 2025.1.0, which has known vulnerabilities; the fixed release. -->
+    <PackageReference Include="SSH.NET" Version="2026.0.0" />
+    <!-- Its rule value comparer, so `rules test` compares values exactly as the database does. -->
+    <PackageReference Include="Winche.Database" Version="11.1.0" />
   </ItemGroup>
 </Project>

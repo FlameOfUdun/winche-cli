@@ -5,6 +5,13 @@ internal sealed class CliEnvironment
 {
     public required TextWriter Out { get; init; }
     public required TextWriter Error { get; init; }
+    public TextReader In { get; init; } = TextReader.Null;
+
+    /// <summary>Reads a password without showing it (null: none to read). Tests give it lines.</summary>
+    public Func<string?> ReadSecret { get; init; } = () => null;
+
+    /// <summary>Whether a person can answer a prompt (stdin is a terminal).</summary>
+    public bool Interactive { get; init; }
     public required string WorkingDirectory { get; init; }
 
     /// <summary>Directory holding <c>credentials.json</c> (default <c>~/.config/winche</c>).</summary>
@@ -20,14 +27,31 @@ internal sealed class CliEnvironment
 
     public TimeProvider Time { get; init; } = TimeProvider.System;
 
+    /// <summary>A line from the terminal with nothing echoed (a password).</summary>
+    private static string? ReadHidden()
+    {
+        if (System.Console.IsInputRedirected) return System.Console.In.ReadLine();
+        var text = new System.Text.StringBuilder();
+        while (true)
+        {
+            var key = System.Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter) { System.Console.WriteLine(); return text.ToString(); }
+            if (key.Key == ConsoleKey.Backspace) { if (text.Length > 0) text.Length--; continue; }
+            if (!char.IsControl(key.KeyChar)) text.Append(key.KeyChar);
+        }
+    }
+
     public static CliEnvironment FromProcess()
     {
         var xdg = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return new CliEnvironment
         {
-            Out = Console.Out,
-            Error = Console.Error,
+            Out = System.Console.Out,
+            Error = System.Console.Error,
+            In = System.Console.In,
+            Interactive = !System.Console.IsInputRedirected,
+            ReadSecret = ReadHidden,
             WorkingDirectory = Directory.GetCurrentDirectory(),
             ConfigDirectory = Path.Combine(string.IsNullOrEmpty(xdg) ? Path.Combine(home, ".config") : xdg, "winche"),
             GetVariable = Environment.GetEnvironmentVariable,

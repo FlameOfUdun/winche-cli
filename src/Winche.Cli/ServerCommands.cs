@@ -1,0 +1,415 @@
+using System.Net;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+namespace Winche.Cli;
+
+/// <summary>
+/// What the console does, from the terminal: setting a server up, two-step sign-in, projects, products, CI tokens and
+/// settings files. Everything goes through the console's API, as the signed-in account (or a CI token where allowed).
+/// </summary>
+internal static partial class CliApp
+{
+    internal sealed partial class Run
+    {
+        // ----- prompts -----------------------------------------------------------------------------
+
+        /// <summary><paramref name="given"/>, or asked for (or <paramref name="fallback"/> when nobody can answer, or the answer's empty).</summary>
+        private string Ask(string label, string? given, string? fallback = null)
+        {
+            if (!string.IsNullOrWhiteSpace(given)) return given.Trim();
+            if (!env.Interactive)
+                return fallback ?? throw new CliException($"{label}: pass it as an option (see winche --help); there's no terminal to ask in.", 2);
+            env.Out.Write(fallback is { Length: > 0 } ? $"{label} [{fallback}]: " : $"{label}: ");
+            var answer = env.In.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(answer)) return fallback ?? throw new CliException($"{label} is needed.", 2);
+            return answer;
+        }
+
+        /// <summary>A secret from <paramref name="variable"/>, or typed without being shown (twice, when <paramref name="confirm"/>).</summary>
+        private string AskSecret(string label, string variable, bool confirm)
+        {
+            if (env.GetVariable(variable) is { Length: > 0 } fromEnv) return fromEnv;
+            if (!env.Interactive) throw new CliException($"{label}: set {variable}; there's no terminal to ask in.", 2);
+            env.Out.Write($"{label}: ");
+            var first = env.ReadSecret() ?? "";
+            if (confirm)
+            {
+                env.Out.Write($"{label} again: ");
+                if (env.ReadSecret() != first) throw new CliException("The two didn't match.", 2);
+            }
+            if (first.Length == 0) throw new CliException($"{label} is needed.", 2);
+            return first;
+        }
+
+        /// <summary>
+        /// Where a project's database goes (<c>--db-name</c>, <c>--db-host</c>, …; the password in <c>WINCHE_DB_PASSWORD</c>),
+        /// or null: a new database on the server's own PostgreSQL.
+        /// </summary>
+        private object? DatabaseTarget()
+        {
+            var name = args.Value("db-name");
+            var host = args.Value("db-host");
+            if (name is null && host is null) return null;
+            int? port = null;
+            if (args.Value("db-port") is { } p)
+                port = int.TryParse(p, out var n) && n is > 0 and < 65536 ? n : throw new CliException($"--db-port {p} isn't a port number.", 2);
+            string? password = null;
+            if (host is not null) password = env.GetVariable("WINCHE_DB_PASSWORD") ?? (env.Interactive ? AskSecret("Database password", "WINCHE_DB_PASSWORD", confirm: false) : null);
+            return new { database = name, host, port, username = args.Value("db-user"), password, sslMode = args.Value("db-ssl") };
+        }
+
+        /// <summary>
+        /// The server's console from <c>--url</c> (a server, <c>https://api.example.com</c>, or its console), else the
+        /// one this project uses. Accounts are the server's: account commands work at its console.
+        /// </summary>
+        private Uri ServerConsole()
+        {
+            if (args.Value("url") is { } url)
+            {
+                if (!Uri.TryCreate(url.TrimEnd('/') + "/", UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https"))
+                    throw new CliException($"--url {url} isn't an http(s) address.", 2);
+                return u.AbsolutePath.Contains("/_console/", StringComparison.Ordinal) ? CredentialStore.ServerOf(u) : new Uri(u, "_console/");
+            }
+            return CredentialStore.ServerOf(ConsoleUrl());
+        }
+
+        // ----- setup -------------------------------------------------------------------------------
+
+        /// <summary>
+        /// <c>winche setup --url &lt;server&gt;</c>: a new server's first-run setup, like the console's: the setup code (from the
+        /// server's log), the admin account (signed in here), and the first project with its database. Run again after
+        /// a failure, it carries on where it stopped.
+        /// </summary>
+        public async Task<int> SetupAsync(CancellationToken ct)
+        {
+            if (args.Value("url") is null && args.Value("console") is null && env.GetVariable("WINCHE_CONSOLE") is null)
+                throw new CliException("Usage: winche setup --url https://api.example.com", 2);
+            var console = ServerConsole();
+            var store = new CredentialStore(env.ConfigDirectory);
+
+            if (store.Active(console) is null)
+            {
+                var code = args.Value("code") ?? env.GetVariable("WINCHE_SETUP_CODE") ?? Ask("Setup code (the server's log: \"Setup code: …\")", null);
+                var email = Ask("Your email", args.Value("email"));
+                var first = Ask("First name", args.Value("first-name"), "");
+                var last = Ask("Last name", args.Value("last-name"), "");
+                var password = AskSecret("Password", "WINCHE_ADMIN_PASSWORD", confirm: true);
+                var (status, body) = await Anonymous(console).SendAsync(HttpMethod.Post, "api/auth/setup",
+                    new { setupCode = code, email, firstName = first, lastName = last, password, cli = ConsoleLogin.SessionName }, ct);
+                if (status == HttpStatusCode.Conflict)
+                    throw new CliException($"{CredentialStore.Key(console)} is already set up. Sign in: winche login --url {CredentialStore.Key(console)}");
+                if (status != HttpStatusCode.OK || body["session"] is not { } session)
+                    throw new CliException($"Setup failed: {(body["error"] is JsonValue v ? v.ToString() : ConsoleClient.ErrorText(body, status))}");
+                store.Put(console, ConsoleLogin.FromSession(session));
+                env.Out.WriteLine($"Made the admin account {email}, and signed in here.");
+            }
+
+            var client = await ClientAsync(console, ct);
+            var project = await client.GetJsonAsync("api/project", ct);
+            if (project["created"]?.GetValue<bool>() != true)
+            {
+                var id = Ask("Project id (lower-case letters, digits and dashes)", args.Value("id"));
+                var name = Ask("Project name", args.Value("name"), id);
+                var products = Products(args.Value("products"));
+                var (status, body) = await client.SendAsync(HttpMethod.Post, "api/project", new { name, id, products, database = DatabaseTarget() }, ct);
+                if (status != HttpStatusCode.OK) throw new CliException($"Making the project failed: {ConsoleClient.ErrorText(body, status)}");
+                env.Out.WriteLine($"Made the project {name} ({id}){(args.Value("db-host") is { } h ? $", its database on {h}" : ", its database on the server's PostgreSQL")}.");
+            }
+            else env.Out.WriteLine($"The first project is {project["name"]} ({project["id"]}).");
+
+            env.Out.WriteLine();
+            env.Out.WriteLine("Next:");
+            env.Out.WriteLine("  winche 2fa enable                    # changing settings needs two-step sign-in (unless the server turns that off)");
+            env.Out.WriteLine("  winche products:start database       # and storage, authentication, functions");
+            env.Out.WriteLine($"  winche init --console {CredentialStore.Key(console)}");
+            return 0;
+        }
+
+        private ConsoleClient Anonymous(Uri console) => new(http, console, "");
+
+        private static string[] Products(string? list)
+        {
+            var products = (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(p => p == "auth" ? "authentication" : p).ToArray();
+            if (products.FirstOrDefault(p => !ProductNames.Contains(p)) is { } unknown)
+                throw new CliException($"'{unknown}' isn't a product: {string.Join(", ", ProductNames)}.", 2);
+            return products;
+        }
+
+        private static readonly string[] ProductNames = ["database", "storage", "authentication", "functions"];
+
+        // ----- two-step sign-in --------------------------------------------------------------------
+
+        /// <summary><c>winche 2fa enable</c>: turns on two-step sign-in for your account with an authenticator app.</summary>
+        public async Task<int> TwoFactorEnableAsync(CancellationToken ct)
+        {
+            var client = await ClientAsync(ServerConsole(), ct);
+            var (status, started) = await client.SendAsync(HttpMethod.Post, "api/auth/2fa/setup", new { }, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Can't start two-step sign-in: {ConsoleClient.ErrorText(started, status)}");
+            env.Out.WriteLine("Add this to your authenticator app (most can open the link, or take the key by hand):");
+            env.Out.WriteLine($"  {started["authenticatorUri"]}");
+            env.Out.WriteLine($"  Key: {started["sharedKey"]}");
+            for (var attempt = 1; ; attempt++)
+            {
+                var code = Ask("The 6-digit code it shows", args.Value("code"));
+                var (ok, body) = await client.SendAsync(HttpMethod.Post, "api/auth/2fa/enable", new { code }, ct);
+                if (ok == HttpStatusCode.OK)
+                {
+                    env.Out.WriteLine("Two-step sign-in is on. Keep these recovery codes somewhere safe (each works once, if you lose the app):");
+                    foreach (var c in body["recoveryCodes"]?.AsArray() ?? []) env.Out.WriteLine($"  {c}");
+                    return 0;
+                }
+                if (attempt >= 3 || args.Value("code") is not null) throw new CliException($"Not turned on: {ConsoleClient.ErrorText(body, ok)}");
+                env.Out.WriteLine("That code didn't work; try the next one.");
+            }
+        }
+
+        // ----- projects and products ---------------------------------------------------------------
+
+        /// <summary><c>winche projects:create &lt;id&gt; [--name …] [--db-…]</c> (server admins).</summary>
+        public async Task<int> ProjectsCreateAsync(string? id, CancellationToken ct)
+        {
+            var console = ServerConsole();
+            id = Ask("Project id (lower-case letters, digits and dashes)", id);
+            var name = Ask("Project name", args.Value("name"), id);
+            var client = await ClientAsync(console, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Post, "api/projects", new { name, id, database = DatabaseTarget() }, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Making the project failed: {ConsoleClient.ErrorText(body, status)}");
+            var url = new Uri(console, body["consoleUrl"]!.GetValue<string>().TrimEnd('/') + "/").ToString().TrimEnd('/');
+            env.Out.WriteLine($"Made the project {name} ({id}): {url}");
+            env.Out.WriteLine($"Use it: winche use --add {id} {url}  (or --project {id})");
+            return 0;
+        }
+
+        /// <summary><c>winche products</c>: the project's products, started or not.</summary>
+        public async Task<int> ProductsAsync(CancellationToken ct)
+        {
+            var project = await (await ClientAsync(ct)).GetJsonAsync("api/project", ct);
+            foreach (var p in project["products"]?.AsArray() ?? [])
+            {
+                var state = p!["ready"]?.GetValue<bool>() == true ? "started"
+                    : p["setup"]?["state"]?.GetValue<string>() is "running" ? "setting up"
+                    : p["setup"]?["state"]?.GetValue<string>() is "failed" ? "setup failed"
+                    : p["started"]?.GetValue<bool>() == true ? "starting" : "off";
+                env.Out.WriteLine($"  {p["id"],-16} {state}");
+            }
+            env.Out.WriteLine("Start one: winche products:start <product>");
+            return 0;
+        }
+
+        /// <summary><c>winche products:start database storage …</c>: starts them and follows each one's setup.</summary>
+        public async Task<int> ProductsStartAsync(IReadOnlyList<string> names, CancellationToken ct)
+        {
+            if (names.Count == 0) throw new CliException($"Usage: winche products:start <product> … ({string.Join(", ", ProductNames)})", 2);
+            var products = Products(string.Join(',', names));
+            var client = await ClientAsync(ct);
+            var failed = false;
+            foreach (var product in products)
+            {
+                var (status, body) = await client.SendAsync(HttpMethod.Post, $"api/project/products/{product}/start", new { }, ct);
+                if (status is not (HttpStatusCode.OK or HttpStatusCode.Accepted)) throw new CliException($"{product}: {ConsoleClient.ErrorText(body, status)}");
+                var shown = 0;
+                while (true)
+                {
+                    var steps = body["steps"]?.AsArray() ?? [];
+                    foreach (var step in steps.Skip(shown).Where(s => s?["state"]?.GetValue<string>() is "done" or "failed"))
+                    {
+                        var ok = step!["state"]!.GetValue<string>() == "done";
+                        env.Out.WriteLine($"  {(ok ? "✓" : "✗")} {product}: {step["title"]}{(ok ? "" : $" — {step["error"]}")}");
+                        shown++;
+                    }
+                    var state = body["state"]?.GetValue<string>();
+                    if (state == "done") { env.Out.WriteLine($"{product} is started."); break; }
+                    if (state == "failed") { env.Error.WriteLine($"{product}'s setup failed (run winche products:start {product} to try again)."); failed = true; break; }
+                    await Task.Delay(TimeSpan.FromMilliseconds(500), env.Time, ct);
+                    (status, body) = await client.SendAsync(HttpMethod.Get, $"api/project/products/{product}/setup", null, ct);
+                    if (status != HttpStatusCode.OK) throw new CliException($"{product}: {ConsoleClient.ErrorText(body, status)}");
+                }
+            }
+            return failed ? 1 : 0;
+        }
+
+        // ----- CI tokens ---------------------------------------------------------------------------
+
+        public async Task<int> TokensListAsync(CancellationToken ct)
+        {
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "api/tokens", null, ct);
+            if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
+            var tokens = body["tokens"]?.AsArray().Where(t => t?["kind"]?.GetValue<string>() == "ci").ToList() ?? [];
+            if (tokens.Count == 0) env.Out.WriteLine("No CI tokens. Make one: winche tokens:create <name> --scopes functions,rules,indexes");
+            foreach (var t in tokens)
+            {
+                var used = t!["lastUsedAt"]?.GetValue<DateTimeOffset>() is { } at ? $"used {at:yyyy-MM-dd}" : "never used";
+                env.Out.WriteLine($"  {t["id"]}  {t["name"],-20} {string.Join(",", t["scopes"]!.AsArray()),-24} by {t["user"]}, until {t["expiresAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd}, {used}");
+            }
+            return 0;
+        }
+
+        public async Task<int> TokensCreateAsync(string name, CancellationToken ct)
+        {
+            var scopes = (args.Value("scopes") ?? throw new CliException("--scopes: what it may deploy, e.g. --scopes functions,rules,indexes", 2))
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var days = args.Value("days") is { } d ? (int.TryParse(d, out var n) ? n : throw new CliException($"--days {d} isn't a number.", 2)) : 90;
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Post, "api/tokens", new { name, scopes, days }, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Not made: {ConsoleClient.ErrorText(body, status)}");
+            if (args.Flag("quiet")) { env.Out.WriteLine(body["secret"]); return 0; }
+            env.Out.WriteLine($"Made the CI token {name} ({body["token"]?["id"]}), for {string.Join(", ", scopes)}, for {days} days. It's shown once:");
+            env.Out.WriteLine(body["secret"]);
+            env.Out.WriteLine("Put it in your CI's secrets as WINCHE_TOKEN.");
+            return 0;
+        }
+
+        /// <summary><c>winche tokens:revoke &lt;id or name&gt;</c>.</summary>
+        public async Task<int> TokensRevokeAsync(string which, CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Get, "api/tokens", null, ct);
+            if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
+            var matches = body["tokens"]?.AsArray().Where(t => t?["kind"]?.GetValue<string>() == "ci" &&
+                (t["id"]?.GetValue<string>() == which || t["name"]?.GetValue<string>() == which)).ToList() ?? [];
+            if (matches.Count == 0) throw new CliException($"No CI token {which}. See them: winche tokens:list");
+            if (matches.Count > 1) throw new CliException($"More than one CI token is called {which}: revoke it by id (winche tokens:list).");
+            var id = matches[0]!["id"]!.GetValue<string>();
+            (status, body) = await client.SendAsync(HttpMethod.Delete, $"api/tokens/{id}", null, ct);
+            if (status != HttpStatusCode.NoContent) throw new CliException($"Not revoked: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine($"Revoked the CI token {matches[0]!["name"]} ({id}).");
+            return 0;
+        }
+
+        // ----- settings files ----------------------------------------------------------------------
+
+        /// <summary>
+        /// A settings area kept as <c>settings/&lt;name&gt;.json</c> beside winche.json. <paramref name="Elsewhere"/>: keys kept
+        /// in another file (the database's indexes and expiry are database.indexes), left as they are on the server.
+        /// </summary>
+        private sealed record SettingsFile(string Name, string Path, string Description, params string[] Elsewhere);
+
+        private static readonly SettingsFile[] SettingsFiles =
+        [
+            new("database", "api/settings/database", "documents: limits, history, request logs", "indexes", "ttl", "dropUndeclaredIndexes"),
+            new("database.live", "api/settings/database.live", "live connections' limits"),
+            new("storage", "api/settings/storage", "files: size limit, request logs"),
+            new("auth", "api/app-auth/settings/signin", "your apps' sign-in methods, providers and emails (the SMTP password isn't in it)"),
+            new("auth.providers", "api/app-auth/settings/providers", "trusted token issuers"),
+            new("webhooks", "api/hooks", "each product's webhooks (their signing secrets stay on the server)"),
+        ];
+
+        private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+        private IReadOnlyList<SettingsFile> SelectedSettings()
+        {
+            if (args.Value("only") is not { } only) return SettingsFiles;
+            var wanted = only.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (wanted.FirstOrDefault(w => SettingsFiles.All(f => f.Name != w)) is { } unknown)
+                throw new CliException($"--only {unknown}: settings files are {string.Join(", ", SettingsFiles.Select(f => f.Name))}.", 2);
+            return [.. SettingsFiles.Where(f => wanted.Contains(f.Name))];
+        }
+
+        private string SettingsDirectory => Path.Combine(Path.GetDirectoryName(RequireConfig().FilePath!)!, "settings");
+
+        private string SettingsPath(SettingsFile f) => Path.Combine(SettingsDirectory, f.Name + ".json");
+
+        /// <summary>The server's settings for <paramref name="f"/> (without what's kept elsewhere) and their version; null when it has none.</summary>
+        private static async Task<(JsonObject Settings, JsonObject Full, int Version)?> LiveAsync(ConsoleClient client, SettingsFile f, CancellationToken ct)
+        {
+            var (status, body) = await client.SendAsync(HttpMethod.Get, f.Path, null, ct);
+            if (status == HttpStatusCode.NotFound) return null;
+            if (status != HttpStatusCode.OK) throw new CliException($"{f.Name}: {ConsoleClient.ErrorText(body, status)}");
+            if (body["available"]?.GetValue<bool>() == false || body["settings"] is not JsonObject settings) return null;
+            var shown = (JsonObject)settings.DeepClone();
+            foreach (var key in f.Elsewhere) shown.Remove(key);
+            return (shown, settings, body["version"]?["number"]?.GetValue<int>() ?? 0);
+        }
+
+        private static string Text(JsonNode node) => node.ToJsonString(Pretty) + "\n";
+
+        /// <summary><c>winche settings pull</c>: writes the project's settings into <c>settings/*.json</c>.</summary>
+        public async Task<int> SettingsPullAsync(CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            Directory.CreateDirectory(SettingsDirectory);
+            foreach (var f in SelectedSettings())
+            {
+                if (await LiveAsync(client, f, ct) is not { } live)
+                {
+                    env.Out.WriteLine($"  {f.Name}: not here (its product isn't started, or the app's code sets it)");
+                    continue;
+                }
+                File.WriteAllText(SettingsPath(f), Text(live.Settings));
+                env.Out.WriteLine($"  wrote settings/{f.Name}.json (v{live.Version}): {f.Description}");
+            }
+            return 0;
+        }
+
+        /// <summary><c>winche settings diff</c>: how the files differ from the project's settings.</summary>
+        public async Task<int> SettingsDiffAsync(CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var any = false;
+            foreach (var (f, file, live) in await LocalAndLiveAsync(client, ct))
+            {
+                var before = live is null ? "" : Text(live.Value.Settings);
+                var after = Text(file);
+                if (before == after) { env.Out.WriteLine($"{f.Name}: unchanged"); continue; }
+                any = true;
+                env.Out.WriteLine($"{f.Name}:");
+                WriteDiff(before, after, live is null ? "(not on the server)" : $"v{live.Value.Version} (on the server)", $"settings/{f.Name}.json");
+            }
+            return any ? 1 : 0;
+        }
+
+        /// <summary><c>winche settings deploy -m "why"</c>: saves changed files as new versions (with the note in the history).</summary>
+        public async Task<int> SettingsDeployAsync(CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var note = args.Value("message") ?? DefaultNote().Replace("winche rules deploy", "winche settings deploy");
+            var changed = 0;
+            foreach (var (f, file, live) in await LocalAndLiveAsync(client, ct))
+            {
+                if (live is null) throw new CliException($"{f.Name}: the project has none to change (its product isn't started, or the app's code sets it).");
+                if (Text(live.Value.Settings) == Text(file) && !args.Flag("force")) { env.Out.WriteLine($"  {f.Name}: unchanged"); continue; }
+                if (args.Flag("dry-run"))
+                {
+                    env.Out.WriteLine($"{f.Name} would change:");
+                    WriteDiff(Text(live.Value.Settings), Text(file), $"v{live.Value.Version}", $"settings/{f.Name}.json");
+                    continue;
+                }
+                var settings = (JsonObject)file.DeepClone();
+                foreach (var key in f.Elsewhere)
+                    if (live.Value.Full[key] is { } kept) settings[key] = kept.DeepClone();
+                var (status, body) = await client.SendAsync(HttpMethod.Put, f.Path, new { settings, reason = note, basedOn = live.Value.Version }, ct);
+                if (status == HttpStatusCode.Conflict)
+                    throw new CliException($"{f.Name}: changed on the server while deploying. See: winche settings diff");
+                if (status != HttpStatusCode.OK) throw new CliException($"{f.Name}: {ConsoleClient.ErrorText(body, status)}");
+                env.Out.WriteLine($"  deployed settings/{f.Name}.json as v{body["number"]}");
+                changed++;
+            }
+            if (!args.Flag("dry-run")) env.Out.WriteLine(changed == 0 ? "Nothing to deploy." : $"Deployed {changed} settings file{(changed == 1 ? "" : "s")} (\"{note}\").");
+            return 0;
+        }
+
+        /// <summary>Each selected settings file that exists here, read, with the server's.</summary>
+        private async Task<List<(SettingsFile File, JsonObject Local, (JsonObject Settings, JsonObject Full, int Version)? Live)>> LocalAndLiveAsync(ConsoleClient client, CancellationToken ct)
+        {
+            var list = new List<(SettingsFile, JsonObject, (JsonObject, JsonObject, int)?)>();
+            foreach (var f in SelectedSettings())
+            {
+                var path = SettingsPath(f);
+                if (!File.Exists(path))
+                {
+                    if (args.Value("only") is not null) throw new CliException($"No settings/{f.Name}.json. Run: winche settings pull --only {f.Name}");
+                    continue;
+                }
+                JsonObject local;
+                try { local = JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? throw new CliException($"settings/{f.Name}.json isn't a JSON object."); }
+                catch (JsonException ex) { throw new CliException($"settings/{f.Name}.json isn't valid JSON: {ex.Message}"); }
+                foreach (var key in f.Elsewhere)
+                    if (local.ContainsKey(key)) throw new CliException($"settings/{f.Name}.json: \"{key}\" is kept in database.indexes (winche indexes deploy), not here.");
+                list.Add((f, local, await LiveAsync(client, f, ct)));
+            }
+            if (list.Count == 0) throw new CliException("No settings files here. Run: winche settings pull");
+            return list;
+        }
+    }
+}

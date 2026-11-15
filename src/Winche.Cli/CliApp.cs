@@ -8,30 +8,82 @@ using Winche.Rules.Text;
 namespace Winche.Cli;
 
 /// <summary>The <c>winche</c> command line.</summary>
-internal static class CliApp
+internal static partial class CliApp
 {
     private const string Usage = """
         Usage: winche <command> [options]
 
         Commands:
-          init                 Create winche.json and starter database.rules / storage.rules
-          login                Sign in to the console in your browser (Keycloak)
-          logout               Forget the saved sign-in for the console
+          init                 Create winche.json, starter database.rules / storage.rules and their test files
+          use [<alias>]        Pick the project (console) to use here, or list them
+                               (--add <alias> <url>, --remove <alias>, --clear)
+          setup --url <server> Set a new server up: the setup code (in its log), your admin account, the first project
+                               (--code, --email, --first-name, --last-name, --id, --name, --products, --db-*;
+                               the password in WINCHE_ADMIN_PASSWORD, or asked)
+          login                Sign in to the server in your browser, once for all its projects (--reauth: again;
+                               --no-browser: a code to enter in a browser on any device)
+          login:add            Sign in another account on the server, beside the one in use
+          login:list           The accounts signed in, by server (* is the one in use)
+          login:use <email>    Use that signed-in account on the server
+          logout [<email>]     End that account's sign-in on the server (none named: all of them)
+          2fa enable           Turn on two-step sign-in for your account (an authenticator app)
           rules validate       Check the rules files (offline)
-          rules deploy         Publish the rules files as new versions on the console
+          rules test           Run the allow/deny cases in the test files (offline)
+          rules deploy         Run the tests, then publish the rules files as new versions on the console
+          rules history [<v>]  List the console's rule versions, or show version <v> against the active one
+          rules rollback <v>   Make version <v> active again (saved as a new version)
           rules diff           Show how the rules files differ from what the console enforces
           rules pull           Write the console's live rules into the rules files
+          projects             The projects on the console's Winche Server that you can use
+          projects:create <id> Make a project (server admins; --name, and --db-name/--db-host/--db-port/--db-user/
+                               --db-ssl with WINCHE_DB_PASSWORD for a database elsewhere)
+          products             The project's products, and whether they're started
+          products:start <p>…  Start products (database, storage, authentication, functions) and follow their setup
+          tokens:list          The project's CI tokens
+          tokens:create <name> Make a CI token (--scopes functions,rules,indexes; --days, default 90; --quiet: only it)
+          tokens:revoke <id>   Revoke a CI token (by id or name)
+          settings pull        Write the project's settings into settings/*.json (--only database,storage,auth,…)
+          settings diff        How the settings files differ from the project's
+          settings deploy      Save the changed settings files as new versions (-m: the note; --dry-run)
+          indexes deploy       Save database.indexes (indexes and expiry) on the console (-m: the note in the history)
+          indexes diff         What deploying it would change
+          indexes pull         Write the console's indexes and expiry to database.indexes (--stdout to print)
+          configure            Write lib/winche_options.dart for a Flutter or Dart app, from a Winche server
+                               (--url; default the emulators)
+          functions init [<dir>]
+                               Make a functions folder (default functions/): an example, deno.json, types for VS Code
+          functions deploy [<dir>]
+                               Deploy the functions folder through the console, as you (winche login) or a CI token
+          emulators start      Run the database, storage, auth and functions locally (Postgres in Docker; rules and functions reloaded on save)
+          emulators exec <cmd> Start the emulators, run <cmd> against them (e.g. your tests), stop, exit with its code
+          emulators token <uid> [claim=value …]
+                               Print a sign-in token the emulators accept
+          emulators idtoken <google|apple> <email>
+                               Print a fake Google or Apple ID token for the emulators' /auth/v1/signIn/idp
+          lsp                  Run the language server for editors (the Winche VS Code extension starts it)
 
         Options:
           --console <url>      Console URL, e.g. https://api.example.com/_console (or WINCHE_CONSOLE, or winche.json)
-          --token <jwt>        Bearer token to use instead of a saved sign-in (or WINCHE_TOKEN; for CI)
+          -P, --project <name> A project from winche.json's "projects" (instead of the one picked with winche use), or
+                               a project id on the same Winche Server; configure: the project at --url/p/<id>
+          --token <token>      A CI token (winche tokens:create, or Project settings → CI tokens) instead of a saved sign-in (or WINCHE_TOKEN)
           --config <path>      winche.json to use (default: the nearest one upward)
           --only <list>        database, storage, or database,storage (default: every file in winche.json)
           -m, --message <text> Note for the deployed versions (deploy)
           --dry-run            Show what deploy would change, without saving
           --force              Deploy even when the console already has these rules
+          --skip-tests         Deploy without running the tests first
+          -y, --yes            Don't ask before a rollback
           --stdout             Print pulled rules instead of writing the files (pull)
-          --port <n>           Loopback port for the sign-in callback (login; default 9005)
+          --port <n>           Loopback port for the sign-in callback (login; default 9005), or the emulators' port (9090)
+          --host <name>        Emulators: the address to listen on (default localhost; 0.0.0.0 for devices)
+          --pg <connection>    Emulators: use this Postgres instead of a temporary one in Docker
+          --data <dir>         Emulators: keep stored files here (default: a temporary folder)
+          --quiet              Emulators: don't print each request
+          --verbose            Emulators: show the servers' own logs
+          --out <file>         configure: where to write (default lib/winche_options.dart)
+          --platforms <list>   configure: android,ios,macos,web,windows,linux (default: the app's platform folders)
+          --app <id>           configure: the app's id, from the console's Project settings → Your apps
           -h, --help           Show this help
           --version            Show the version
         """;
@@ -54,17 +106,47 @@ internal static class CliApp
             }
 
             using var http = new HttpClient(env.Http, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(60) };
-            var command = string.Join(' ', a.Positional.Take(a.Positional[0] == "rules" ? 2 : 1));
+            var command = string.Join(' ', a.Positional.Take(a.Positional[0] is "rules" or "emulators" or "functions" or "indexes" or "settings" or "2fa" ? 2 : 1));
             var run = new Run(env, a, http);
             return command switch
             {
                 "init" => run.Init(),
-                "login" => await run.LoginAsync(ct),
-                "logout" => run.Logout(),
+                "use" => run.Use(a.Positional.ElementAtOrDefault(1), a.Positional.ElementAtOrDefault(2)),
+                "login" => await run.LoginAsync(add: false, ct),
+                "login:add" => await run.LoginAsync(add: true, ct),
+                "login:list" => run.LoginList(),
+                "login:use" => run.LoginUse(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche login:use <email>", 2)),
+                "logout" => await run.LogoutAsync(a.Positional.ElementAtOrDefault(1), ct),
                 "rules validate" => run.Validate(),
+                "rules test" => await run.TestAsync(ct),
+                "rules history" => await run.HistoryAsync(a.Positional.ElementAtOrDefault(2), ct),
+                "rules rollback" => await run.RollbackAsync(a.Positional.ElementAtOrDefault(2), ct),
                 "rules deploy" => await run.DeployAsync(ct),
                 "rules diff" => await run.DiffAsync(ct),
                 "rules pull" => await run.PullAsync(ct),
+                "configure" => await run.ConfigureAsync(ct),
+                "projects" => await run.ProjectsAsync(ct),
+                "setup" => await run.SetupAsync(ct),
+                "2fa enable" => await run.TwoFactorEnableAsync(ct),
+                "projects:create" => await run.ProjectsCreateAsync(a.Positional.ElementAtOrDefault(1), ct),
+                "products" => await run.ProductsAsync(ct),
+                "products:start" => await run.ProductsStartAsync(a.Positional.Skip(1).ToList(), ct),
+                "tokens:list" => await run.TokensListAsync(ct),
+                "tokens:create" => await run.TokensCreateAsync(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche tokens:create <name> --scopes functions,rules,indexes [--days 90]", 2), ct),
+                "tokens:revoke" => await run.TokensRevokeAsync(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche tokens:revoke <id>", 2), ct),
+                "settings pull" => await run.SettingsPullAsync(ct),
+                "settings diff" => await run.SettingsDiffAsync(ct),
+                "settings deploy" => await run.SettingsDeployAsync(ct),
+                "indexes deploy" => await run.IndexesDeployAsync(ct),
+                "indexes diff" => await run.IndexesDiffAsync(ct),
+                "indexes pull" => await run.IndexesPullAsync(ct),
+                "functions init" => run.FunctionsInit(a.Positional.ElementAtOrDefault(2)),
+                "functions deploy" => await run.FunctionsDeployAsync(a.Positional.ElementAtOrDefault(2), ct),
+                "emulators start" => await run.EmulatorsAsync(null, ct),
+                "emulators exec" => await run.EmulatorsAsync(a.Positional.Count > 2 ? string.Join(' ', a.Positional.Skip(2)) : throw new CliException("Usage: winche emulators exec \"<command>\"", 2), ct),
+                "emulators token" => run.Token(a.Positional.Skip(2).ToList()),
+                "emulators idtoken" => run.IdToken(a.Positional.Skip(2).ToList()),
+                "lsp" => await new LanguageServer(System.Console.OpenStandardInput(), System.Console.OpenStandardOutput(), env, http).RunAsync(ct),
                 _ => throw new CliException($"Unknown command '{string.Join(' ', a.Positional)}'. Run: winche --help", 2),
             };
         }
@@ -80,7 +162,7 @@ internal static class CliApp
         }
     }
 
-    private sealed class Run(CliEnvironment env, Args args, HttpClient http)
+    internal sealed partial class Run(CliEnvironment env, Args args, HttpClient http)
     {
         private ProjectConfig? _config;
         private bool _configLoaded;
@@ -97,13 +179,65 @@ internal static class CliApp
         private ProjectConfig RequireConfig() =>
             Config ?? throw new CliException($"No {ProjectConfig.FileName} here or in a parent directory. Run: winche init");
 
-        private Uri ConsoleUrl()
+        private ConsoleTarget Target() =>
+            ConsoleTarget.Resolve(Config, args.Value("console"), args.Value("project"), env)
+            ?? throw new CliException($"Which console? Pass --console <url>, set WINCHE_CONSOLE, or add \"projects\" (winche use --add <alias> <url>) or \"console\" to {ProjectConfig.FileName}.");
+
+        private Uri ConsoleUrl() => Target().Url;
+
+        // ----- use --------------------------------------------------------------------------------
+
+        public int Use(string? alias, string? url)
         {
-            var raw = args.Value("console") ?? env.GetVariable("WINCHE_CONSOLE") ?? Config?.Console
-                      ?? throw new CliException($"Which console? Pass --console <url>, set WINCHE_CONSOLE, or add \"console\" to {ProjectConfig.FileName}.");
-            if (!Uri.TryCreate(raw.TrimEnd('/') + "/", UriKind.Absolute, out var uri) || (uri.Scheme != "https" && uri.Scheme != "http"))
-                throw new CliException($"'{raw}' isn't a console URL (expected https://host/prefix).");
-            return uri;
+            var config = RequireConfig();
+            var path = config.FilePath!;
+            if (args.Value("add") is { } add)
+            {
+                var target = url ?? alias ?? throw new CliException("Usage: winche use --add <alias> <console url>", 2);
+                ConsoleTarget.Parse(target);
+                (config.Projects ??= new(StringComparer.Ordinal))[add] = target.TrimEnd('/');
+                config.Save(path);
+                ActiveProjects.Set(env, path, add);
+                env.Out.WriteLine($"Added {add} ({target.TrimEnd('/')}) and using it here.");
+                return 0;
+            }
+            if (args.Value("remove") is { } remove)
+            {
+                if (config.Projects is null || !config.Projects.Remove(remove)) throw new CliException($"No project named '{remove}'.");
+                if (config.Projects.Count == 0) config.Projects = null;
+                config.Save(path);
+                if (ActiveProjects.Get(env, path) == remove) ActiveProjects.Set(env, path, null);
+                env.Out.WriteLine($"Removed {remove}.");
+                return 0;
+            }
+            if (args.Flag("clear"))
+            {
+                ActiveProjects.Set(env, path, null);
+                env.Out.WriteLine("No project picked here now.");
+                return 0;
+            }
+
+            var projects = config.Projects ?? [];
+            if (alias is null)
+            {
+                if (projects.Count == 0)
+                {
+                    env.Out.WriteLine($"No projects in {ProjectConfig.FileName}. Add one: winche use --add <alias> <console url>");
+                    return 0;
+                }
+                var active = ActiveProjects.Get(env, path);
+                foreach (var (name, target) in projects.OrderBy(p => p.Key, StringComparer.Ordinal))
+                    env.Out.WriteLine($"{(name == active ? "*" : " ")} {name,-12} {target}");
+                if (active is null) env.Out.WriteLine(projects.Count == 1 ? "(the only project is used)" : "(none picked: winche use <alias>)");
+                return 0;
+            }
+            if (!projects.ContainsKey(alias))
+                throw new CliException(projects.Count == 0
+                    ? $"No projects in {ProjectConfig.FileName}. Add one: winche use --add {alias} <console url>"
+                    : $"No project named '{alias}' (have {string.Join(", ", projects.Keys)}). Add it: winche use --add {alias} <console url>");
+            ActiveProjects.Set(env, path, alias);
+            env.Out.WriteLine($"Now using {alias} ({projects[alias]}) here.");
+            return 0;
         }
 
         // ----- init ------------------------------------------------------------------------------
@@ -117,11 +251,16 @@ internal static class CliApp
             foreach (var sys in Selected(ProjectConfig.Subsystems))
             {
                 var file = $"{sys}.rules";
+                var tests = $"{sys}.rules.test";
                 config.Rules[sys] = file;
-                var full = Path.Combine(env.WorkingDirectory, file);
-                if (File.Exists(full)) { env.Out.WriteLine($"  kept    {file}"); continue; }
-                File.WriteAllText(full, Starter(sys));
-                env.Out.WriteLine($"  created {file}");
+                (config.Tests ??= new(StringComparer.Ordinal))[sys] = tests;
+                foreach (var (name, content) in new[] { (file, Starter(sys)), (tests, StarterTests(sys)) })
+                {
+                    var full = Path.Combine(env.WorkingDirectory, name);
+                    if (File.Exists(full)) { env.Out.WriteLine($"  kept    {name}"); continue; }
+                    File.WriteAllText(full, content);
+                    env.Out.WriteLine($"  created {name}");
+                }
             }
             config.Save(path);
             env.Out.WriteLine($"  created {ProjectConfig.FileName}");
@@ -152,50 +291,437 @@ internal static class CliApp
 
               """;
 
+        private static string StarterTests(string sys) => sys == "database"
+            ? """
+              // Checks for database.rules, run by `winche rules test` and before `winche rules deploy`.
+              //
+              // test "owners read their profile" {
+              //   auth { uid: 'u1' }                 // request.auth's claims; omit when signed out
+              //   resource { name: 'Ann' }           // the existing document
+              //   allow get users/u1
+              //   deny get users/u2
+              //   allow create users/u1 with { name: 'Ann' }
+              //   allow list notes where ownerId == 'u1'
+              // }
+
+              test "signed out can't read users" {
+                deny get users/u1
+              }
+
+              """
+            : """
+              // Checks for storage.rules, run by `winche rules test` and before `winche rules deploy`.
+
+              test "signed out can't read files" {
+                deny get userFiles/u1/photo.png
+              }
+
+              """;
+
+        // ----- emulators -------------------------------------------------------------------------
+
+        // ----- functions -------------------------------------------------------------------------
+
+        private string FunctionsDir(string? given) => given is not null ? Path.GetFullPath(given, env.WorkingDirectory)
+            : Config?.FunctionsPath ?? Path.Combine(Config?.Directory ?? env.WorkingDirectory, "functions");
+
+        public int FunctionsInit(string? dir)
+        {
+            var target = FunctionsDir(dir);
+            var made = FunctionsFolder.Init(target);
+            foreach (var f in made) env.Out.WriteLine($"  wrote {Path.GetRelativePath(env.WorkingDirectory, Path.Combine(target, f))}");
+            if (Config is { FilePath: { } file } config && config.Functions is null)
+            {
+                var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+                json["functions"] = Path.GetRelativePath(config.Directory, target).Replace('\\', '/');
+                File.WriteAllText(file, json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+                env.Out.WriteLine($"  added \"functions\" to {Path.GetFileName(file)}");
+            }
+            env.Out.WriteLine("Functions are ready: edit index.ts (the Deno extension for VS Code gives types), then run: winche emulators start");
+            return 0;
+        }
+
+        // ----- indexes -----------------------------------------------------------------------------
+
+        private const string IndexesApi = "api/settings/database/indexes";
+
+        private string IndexesFile()
+        {
+            var path = RequireConfig().IndexesPath;
+            if (!File.Exists(path)) throw new CliException($"No {Path.GetRelativePath(env.WorkingDirectory, path)}. Run: winche indexes pull");
+            return path;
+        }
+
+        private async Task<string> LiveIndexesAsync(ConsoleClient client, CancellationToken ct) =>
+            (await client.GetJsonAsync(IndexesApi, ct))["text"]?.GetValue<string>() ?? "";
+
+        /// <summary>Checks the file on the console, then saves it there (the note is the reason in the history).</summary>
+        public async Task<int> IndexesDeployAsync(CancellationToken ct)
+        {
+            var path = IndexesFile();
+            var text = await File.ReadAllTextAsync(path, ct);
+            var client = await ClientAsync(ct);
+            var (_, parsed) = await client.PostAsync($"{IndexesApi}/parse", new { text }, "indexes", ct);
+            if (parsed["ok"]?.GetValue<bool>() != true && parsed["error"] is System.Text.Json.Nodes.JsonObject e)
+                throw new CliException($"{Path.GetRelativePath(env.WorkingDirectory, path)}:{e["line"]}:{e["column"]}: {e["message"]}");
+            var live = await LiveIndexesAsync(client, ct);
+            if (Normalize(live) == Normalize(await FormattedAsync(client, text, ct)))
+            {
+                env.Out.WriteLine("indexes: no changes.");
+                return 0;
+            }
+            var note = args.Value("message") ?? DefaultNote().Replace("winche rules deploy", "winche indexes deploy");
+            var (ok, saved) = await client.PutAsync(IndexesApi, new { text, reason = note }, "indexes", ct);
+            if (!ok) throw new CliException($"indexes: the console refused them: {saved["error"]?["message"] ?? saved["error"] ?? saved}");
+            env.Out.WriteLine($"indexes: deployed as version {saved["number"]} ({note}). Indexes are built in the background.");
+            return 0;
+        }
+
+        // What the console would show for this text (its own formatting), to compare without whitespace and comments.
+        private static async Task<string> FormattedAsync(ConsoleClient client, string text, CancellationToken ct)
+        {
+            var (_, parsed) = await client.PostAsync($"{IndexesApi}/parse", new { text }, "indexes", ct);
+            if (parsed["indexes"] is null) return text;
+            var indexes = System.Text.Json.JsonSerializer.Deserialize<List<Winche.Database.Settings.IndexSettings>>(parsed["indexes"]!.ToJsonString(), Web)!;
+            var ttl = System.Text.Json.JsonSerializer.Deserialize<List<Winche.Database.Settings.TtlSettings>>(parsed["ttl"]!.ToJsonString(), Web)!;
+            return Winche.Database.Settings.IndexText.Format(indexes, ttl);
+        }
+
+        private static readonly System.Text.Json.JsonSerializerOptions Web = new(System.Text.Json.JsonSerializerDefaults.Web);
+        private static string Normalize(string text) => text.Replace("\r\n", "\n").Trim();
+
+        /// <summary>What deploying the file would change on the console.</summary>
+        public async Task<int> IndexesDiffAsync(CancellationToken ct)
+        {
+            var path = IndexesFile();
+            var client = await ClientAsync(ct);
+            var live = await LiveIndexesAsync(client, ct);
+            var mine = await FormattedAsync(client, await File.ReadAllTextAsync(path, ct), ct);
+            if (Normalize(live) == Normalize(mine)) { env.Out.WriteLine("indexes: no changes."); return 0; }
+            WriteDiff(live, mine, "console", Path.GetRelativePath(env.WorkingDirectory, path));
+            return 0;
+        }
+
+        /// <summary>Writes the console's indexes and expiry to the file (or stdout).</summary>
+        public async Task<int> IndexesPullAsync(CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var live = await LiveIndexesAsync(client, ct);
+            if (args.Flag("stdout")) { env.Out.Write(live); return 0; }
+            var path = RequireConfig().IndexesPath;
+            await File.WriteAllTextAsync(path, live, ct);
+            env.Out.WriteLine($"indexes: wrote {Path.GetRelativePath(env.WorkingDirectory, path)} (comments aren't kept on the console)");
+            return 0;
+        }
+
+        // ----- projects ----------------------------------------------------------------------------
+
+        /// <summary>The projects on the console's Winche Server that this account may use (and the archived, for server admins).</summary>
+        public async Task<int> ProjectsAsync(CancellationToken ct)
+        {
+            var body = await (await ClientAsync(ct)).GetJsonAsync("api/projects", ct);
+            var console = ConsoleUrl();
+            if (body["available"]?.GetValue<bool>() != true)
+            {
+                env.Out.WriteLine($"{console} runs one project: {body["current"]}.");
+                return 0;
+            }
+            var current = body["current"]?.GetValue<string>();
+            foreach (var p in body["projects"]!.AsArray())
+            {
+                var id = p!["id"]!.GetValue<string>();
+                var url = new Uri(console, p["consoleUrl"]!.GetValue<string>().TrimEnd('/') + "/");
+                env.Out.WriteLine($"{(id == current ? "*" : " ")} {id,-24} {p["name"]}  {url}");
+            }
+            if (body["archived"]?.AsArray() is { Count: > 0 } archived)
+            {
+                env.Out.WriteLine("Archived:");
+                foreach (var a in archived) env.Out.WriteLine($"  {a!["id"],-24} {a["name"]}");
+            }
+            env.Out.WriteLine("Use one: --project <id> (or winche use --add <alias> <its console>).");
+            return 0;
+        }
+
+        // ----- configure ---------------------------------------------------------------------------
+
+        /// <summary>
+        /// Reads the server's /.well-known/winche and writes lib/winche_options.dart: a DefaultWincheOptions per
+        /// platform, for WincheFlutter.initializeApp(options: DefaultWincheOptions.currentPlatform).
+        /// </summary>
+        public async Task<int> ConfigureAsync(CancellationToken ct)
+        {
+            var url = (args.Value("url") ?? env.GetVariable("WINCHE_SERVER") ?? $"http://localhost:{args.Value("port") ?? "9090"}").TrimEnd('/');
+            // --project <id>: that project on a Winche Server with several (/p/<id>).
+            if (args.Value("project") is { } projectId && args.Value("url") is not null)
+            {
+                if (!WincheIds.IsValid(projectId)) throw new CliException($"--project {projectId} isn't a project id.", 2);
+                url = $"{url}/p/{projectId}";
+            }
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var server) || server.Scheme is not ("http" or "https"))
+                throw new CliException($"{url} isn't an address. Pass --url https://api.example.com", 2);
+
+            WincheAppSetup setup;
+            try
+            {
+                var appId = args.Value("app");
+                using var response = await http.GetAsync(new Uri(server, "/.well-known/winche" + (appId is null ? "" : $"?app={Uri.EscapeDataString(appId)}")), ct);
+                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    var body = await response.Content.ReadAsStringAsync(ct);
+                    if (appId is not null && body.Contains("\"error\"", StringComparison.Ordinal))
+                        throw new CliException($"No app {appId} is registered there. Register it in the console (Project settings → Your apps) and copy its id.", 2);
+                    throw new CliException($"{url} doesn't publish its setup (/.well-known/winche). Is it a Winche Server or the emulators, up to date?");
+                }
+                response.EnsureSuccessStatusCode();
+                setup = await System.Net.Http.Json.HttpContentJsonExtensions.ReadFromJsonAsync<WincheAppSetup>(
+                    response.Content, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web), ct)
+                    ?? throw new CliException($"{url} sent an empty setup.");
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new CliException(args.Value("url") is null && env.GetVariable("WINCHE_SERVER") is null
+                    ? $"Couldn't reach the emulators at {url} ({ex.Message}). Start them (winche emulators start) or pass --url."
+                    : $"Couldn't reach {url}: {ex.Message}");
+            }
+
+            var platforms = args.Value("platforms") is { } list
+                ? list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                : WincheAppSetup.AllPlatforms.Where(p => Directory.Exists(Path.Combine(env.WorkingDirectory, p))).ToArray();
+            var unknown = platforms.Where(p => !WincheAppSetup.AllPlatforms.Contains(p.ToLowerInvariant())).ToList();
+            if (unknown.Count > 0)
+                throw new CliException($"Unknown platform {string.Join(", ", unknown)}: use {string.Join(", ", WincheAppSetup.AllPlatforms)}.", 2);
+            if (platforms.Length == 0) platforms = [.. WincheAppSetup.AllPlatforms];
+
+            var target = Path.GetFullPath(args.Value("out") ?? Path.Combine("lib", "winche_options.dart"), env.WorkingDirectory);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            await File.WriteAllTextAsync(target, setup.DartOptionsFile(platforms), ct);
+
+            env.Out.WriteLine($"Wrote {Path.GetRelativePath(env.WorkingDirectory, target)} for project {setup.ProjectId} at {setup.BaseUrl}");
+            env.Out.WriteLine(setup.App is { } registered
+                ? $"  app:       {registered.Name} ({registered.Id})"
+                : "  app:       none (register the app in the console, then run this again with --app <its id>)");
+            env.Out.WriteLine($"  platforms: {string.Join(", ", platforms)}");
+            env.Out.WriteLine($"  services:  {(setup.Services.Count == 0 ? "none" : string.Join(", ", setup.Services.Select(s => s.Id)))}");
+            if (setup.Providers.Where(p => p.ClientIds.Count > 1).Select(p => p.Name).ToList() is { Count: > 0 } several)
+                env.Out.WriteLine($"  {string.Join(", ", several)}: several client ids; the file lists them for you to pick one per platform.");
+            if (!File.Exists(Path.Combine(env.WorkingDirectory, "pubspec.yaml")))
+                env.Out.WriteLine("  (no pubspec.yaml here: run this in your app's folder, or pass --out)");
+            env.Out.WriteLine("Next: flutter pub add winche_flutter, then in main():");
+            env.Out.WriteLine("  final app = await WincheFlutter.initializeApp(options: DefaultWincheOptions.currentPlatform);");
+            return 0;
+        }
+
+        public async Task<int> FunctionsDeployAsync(string? dir, CancellationToken ct)
+        {
+            var folder = FunctionsDir(dir);
+            var client = await ClientAsync(ct);
+            return await FunctionsFolder.DeployAsync(client, folder, args.Value("message"), env, ct);
+        }
+
+        public async Task<int> EmulatorsAsync(string? command, CancellationToken ct)
+        {
+            var port = 9090;
+            if (args.Value("port") is { } p && (!int.TryParse(p, out port) || port is < 0 or > 65535))
+                throw new CliException($"--port {p} isn't a port number.", 2);
+            var config = Config;
+            string? Rules(string sys) => config is not null && config.Rules.ContainsKey(sys) ? config.RulesPath(sys) : null;
+            var options = new Emulator.EmulatorOptions
+            {
+                Port = port,
+                Host = args.Value("host") ?? "localhost",
+                ConnectionString = args.Value("pg"),
+                DataDirectory = args.Value("data") is { } d ? Path.GetFullPath(d, env.WorkingDirectory) : null,
+                DatabaseRules = Rules("database"),
+                StorageRules = Rules("storage"),
+                Functions = FunctionsDir(null) is var fdir && Directory.Exists(fdir) ? fdir : null,
+                Quiet = args.Flag("quiet") || command is not null,
+                Verbose = args.Flag("verbose"),
+                ProjectId = config?.ProjectId ?? "demo",
+            };
+
+            if (options.Functions is not null) options = options with { DenoPath = await DenoInstaller.EnsureAsync(env, http, ct) };
+            await using var host = await Emulator.EmulatorHost.StartAsync(options, env.Out, ct);
+            if (command is null)
+            {
+                host.PrintBanner(options.DatabaseRules, options.StorageRules);
+                env.Out.WriteLine("Press Ctrl+C to stop.");
+                using var either = CancellationTokenSource.CreateLinkedTokenSource(ct, host.Stopping);
+                try { await Task.Delay(Timeout.Infinite, either.Token); }
+                catch (OperationCanceledException) { env.Out.WriteLine("Stopping…"); }
+                return 0;
+            }
+
+            env.Out.WriteLine($"Emulators at {host.BaseUrl}; running: {command}");
+            var psi = OperatingSystem.IsWindows()
+                ? new System.Diagnostics.ProcessStartInfo("cmd.exe", ["/c", command])
+                : new System.Diagnostics.ProcessStartInfo("/bin/sh", ["-c", command]);
+            psi.WorkingDirectory = env.WorkingDirectory;
+            psi.Environment["WINCHE_EMULATOR"] = host.BaseUrl;
+            psi.Environment["WINCHE_EMULATOR_HOST"] = new Uri(host.BaseUrl).Authority;
+            psi.Environment["WINCHE_DATABASE_URL"] = host.BaseUrl + "/documents/v1";
+            psi.Environment["WINCHE_STORAGE_URL"] = host.BaseUrl + "/files/v1";
+            using var process = System.Diagnostics.Process.Start(psi) ?? throw new CliException($"Couldn't run: {command}");
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct, host.Stopping);
+            try
+            {
+                await process.WaitForExitAsync(stop.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                process.Kill(entireProcessTree: true);
+                throw;
+            }
+            env.Out.WriteLine($"{command} exited with {process.ExitCode}; stopping the emulators.");
+            return process.ExitCode;
+        }
+
+        public int Token(List<string> words)
+        {
+            if (words.Count == 0) throw new CliException("Usage: winche emulators token <uid> [claim=value …]", 2);
+            var claims = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var pair in words.Skip(1))
+            {
+                var eq = pair.IndexOf('=');
+                if (eq <= 0) throw new CliException($"'{pair}' isn't claim=value.", 2);
+                var value = pair[(eq + 1)..];
+                claims[pair[..eq]] = value switch
+                {
+                    "true" => true,
+                    "false" => false,
+                    _ when long.TryParse(value, out var l) => l,
+                    _ => value,
+                };
+            }
+            env.Out.WriteLine(Emulator.TestTokens.Mint(words[0], claims));
+            return 0;
+        }
+
+        public int IdToken(List<string> words)
+        {
+            if (words.Count != 2 || words[0] is not ("google" or "apple") || !words[1].Contains('@'))
+                throw new CliException("Usage: winche emulators idtoken <google|apple> <email>", 2);
+            env.Out.WriteLine(Emulator.TestTokens.MintIdToken(words[0], words[1]));
+            return 0;
+        }
+
         // ----- login / logout --------------------------------------------------------------------
 
-        public async Task<int> LoginAsync(CancellationToken ct)
+        /// <summary>
+        /// <c>winche login</c>: signs in to the server (once for all its projects). Already signed in, it says so, unless
+        /// <c>--reauth</c>. <c>winche login:add</c> signs in another account beside it (<c>login:use</c> switches).
+        /// </summary>
+        public async Task<int> LoginAsync(bool add, CancellationToken ct)
         {
             var console = ConsoleUrl();
-            var port = KeycloakLogin.DefaultPort;
+            var server = CredentialStore.ServerOf(console);
+            var store = new CredentialStore(env.ConfigDirectory);
+            if (!add && !args.Flag("reauth") && store.Active(console) is { } signedIn)
+            {
+                env.Out.WriteLine($"Already signed in to {CredentialStore.Key(console)} as {signedIn.User}.");
+                env.Out.WriteLine("winche login --reauth signs in again; winche login:add adds another account.");
+                return 0;
+            }
+            var port = ConsoleLogin.DefaultPort;
             if (args.Value("port") is { } p && (!int.TryParse(p, out port) || port is < 1 or > 65535))
                 throw new CliException($"--port {p} isn't a port number.", 2);
 
-            var login = await new KeycloakLogin(env, http).LoginAsync(console, port, ct);
-            new CredentialStore(env.ConfigDirectory).Put(console, login);
-            env.Out.WriteLine($"Signed in to {CredentialStore.Key(console)}{(login.User is null ? "" : $" as {login.User}")}.");
+            var login = args.Flag("no-browser")
+                ? await new ConsoleLogin(env, http).DeviceLoginAsync(server, ct)
+                : await new ConsoleLogin(env, http).LoginAsync(server, port, ct);
+            var use = !add || store.Active(console) is null;
+            store.Put(console, login, use);
+            env.Out.WriteLine($"Signed in to {CredentialStore.Key(console)} as {login.User}{(use ? "" : $" (still using {store.Active(console)?.User}: winche login:use {login.User})")}.");
             return 0;
         }
 
-        public int Logout()
+        /// <summary><c>winche login:list</c>: every server's signed-in accounts, the one in use marked.</summary>
+        public int LoginList()
         {
-            var console = ConsoleUrl();
-            var store = new CredentialStore(env.ConfigDirectory);
-            if (store.Get(console) is null)
+            var all = new CredentialStore(env.ConfigDirectory).All();
+            if (all.Count == 0)
             {
-                env.Out.WriteLine($"Not signed in to {CredentialStore.Key(console)}.");
+                env.Out.WriteLine("Not signed in anywhere. Run: winche login");
                 return 0;
             }
-            store.Put(console, null);
-            env.Out.WriteLine($"Signed out of {CredentialStore.Key(console)}.");
+            foreach (var (server, logins) in all.OrderBy(x => x.Key, StringComparer.Ordinal))
+            {
+                env.Out.WriteLine(server);
+                foreach (var user in logins.Accounts.Keys.Order(StringComparer.OrdinalIgnoreCase))
+                    env.Out.WriteLine($"  {(string.Equals(user, logins.Active, StringComparison.OrdinalIgnoreCase) ? "*" : " ")} {user}");
+            }
             return 0;
         }
 
-        private async Task<ConsoleClient> ClientAsync(CancellationToken ct)
+        /// <summary><c>winche login:use &lt;email&gt;</c>: the account commands use on this server.</summary>
+        public int LoginUse(string user)
         {
             var console = ConsoleUrl();
+            if (!new CredentialStore(env.ConfigDirectory).Use(console, user))
+                throw new CliException($"{user} isn't signed in to {CredentialStore.Key(console)}. Run: winche login:add");
+            env.Out.WriteLine($"Using {user} on {CredentialStore.Key(console)}.");
+            return 0;
+        }
+
+        /// <summary><c>winche logout [&lt;email&gt;]</c>: ends one account's sign-in there, or (none named) every one.</summary>
+        public async Task<int> LogoutAsync(string? user, CancellationToken ct)
+        {
+            var console = ConsoleUrl();
+            var server = CredentialStore.ServerOf(console);
+            var store = new CredentialStore(env.ConfigDirectory);
+            var signedIn = store.Server(console)?.Accounts ?? [];
+            var leaving = user is null ? signedIn.Keys.ToList() : signedIn.Keys.Where(u => string.Equals(u, user, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (leaving.Count == 0)
+            {
+                env.Out.WriteLine(user is null ? $"Not signed in to {CredentialStore.Key(console)}." : $"{user} isn't signed in to {CredentialStore.Key(console)}.");
+                return 0;
+            }
+            foreach (var u in leaving)
+            {
+                await new ConsoleLogin(env, http).LogoutAsync(server, signedIn[u], ct);   // ends the session there too
+                store.Remove(console, u);
+                env.Out.WriteLine($"Signed {u} out of {CredentialStore.Key(console)}.");
+            }
+            return 0;
+        }
+
+        private async Task<ConsoleClient> ClientAsync(CancellationToken ct) => await ClientAsync(null, ct);
+
+        /// <summary>A client for <paramref name="url"/> (default: the project's console), signed in or with a CI token.</summary>
+        private async Task<ConsoleClient> ClientAsync(Uri? url, CancellationToken ct)
+        {
+            if (url is not null)
+            {
+                var direct = args.Value("token") ?? env.GetVariable("WINCHE_TOKEN");
+                if (string.IsNullOrWhiteSpace(direct))
+                    direct = await SignedInTokenAsync(env, http, url, ct) ?? throw new CliException($"Not signed in to {CredentialStore.Key(url)}. Run: winche login");
+                return new ConsoleClient(http, url, direct);
+            }
+            var target = Target();
+            var console = target.Url;
+            if (target.Alias is not null) env.Out.WriteLine($"Project: {target.Describe()}");
             var token = args.Value("token") ?? env.GetVariable("WINCHE_TOKEN");
             if (string.IsNullOrWhiteSpace(token))
-            {
-                var store = new CredentialStore(env.ConfigDirectory);
-                var saved = store.Get(console)
-                            ?? throw new CliException($"Not signed in to {CredentialStore.Key(console)}. Run: winche login");
-                var fresh = await new KeycloakLogin(env, http).RefreshIfNeededAsync(saved, ct)
-                            ?? throw new CliException($"Your sign-in to {CredentialStore.Key(console)} has ended. Run: winche login");
-                if (!ReferenceEquals(fresh, saved)) store.Put(console, fresh);
-                token = fresh.AccessToken;
-            }
+                token = await SignedInTokenAsync(env, http, console, ct)
+                        ?? throw new CliException($"Not signed in to {CredentialStore.Key(console)}. Run: winche login");
             return new ConsoleClient(http, console, token);
+        }
+
+        /// <summary>
+        /// The active account's access token for <paramref name="console"/>'s server, renewed when it's about to run out;
+        /// null when nobody's signed in there. A session that has ended is forgotten, with a hint to sign in again.
+        /// </summary>
+        internal static async Task<string?> SignedInTokenAsync(CliEnvironment env, HttpClient http, Uri console, CancellationToken ct)
+        {
+            var store = new CredentialStore(env.ConfigDirectory);
+            if (store.Active(console) is not { } saved) return null;
+            var fresh = await new ConsoleLogin(env, http).FreshAsync(CredentialStore.ServerOf(console), saved, ct);
+            if (fresh is null)
+            {
+                store.Remove(console, saved.User);
+                throw new CliException($"Your sign-in to {CredentialStore.Key(console)} as {saved.User} has ended. Run: winche login");
+            }
+            if (!ReferenceEquals(fresh, saved)) store.Put(console, fresh);
+            return fresh.AccessToken;
         }
 
         // ----- rules -----------------------------------------------------------------------------
@@ -280,9 +806,59 @@ internal static class CliApp
             return 0;
         }
 
+        public async Task<int> TestAsync(CancellationToken ct)
+        {
+            var locals = LoadAll();
+            var config = RequireConfig();
+            if (!locals.Any(l => config.TestsPath(l.Subsystem) is not null))
+                throw new CliException($"No test files: add \"tests\": {{ \"database\": \"database.rules.test\" }} to {ProjectConfig.FileName}.");
+            return await RunTestsAsync(locals, verbose: true, ct) ? 0 : 1;
+        }
+
+        /// <summary>Runs each file's cases; prints failures (and passes when <paramref name="verbose"/>).</summary>
+        private async Task<bool> RunTestsAsync(List<LocalRules> locals, bool verbose, CancellationToken ct)
+        {
+            var config = RequireConfig();
+            int passed = 0, failed = 0;
+            foreach (var local in locals)
+            {
+                if (config.TestsPath(local.Subsystem) is not { } file) continue;
+                var display = Path.GetRelativePath(env.WorkingDirectory, file);
+                if (!File.Exists(file)) throw new CliException($"{display}: file not found ({local.Subsystem} tests in {ProjectConfig.FileName}).");
+
+                IReadOnlyList<RuleTests.Outcome> outcomes;
+                try
+                {
+                    outcomes = await RuleTests.RunAsync(local.Subsystem, local.RuleSet, file, ct);
+                }
+                catch (RuleTestSyntaxException ex)
+                {
+                    throw new CliException($"{display}:{ex.Line}:{ex.Column}: {ex.Message}");
+                }
+
+                env.Out.WriteLine($"{display} ({local.Subsystem})");
+                foreach (var group in outcomes.GroupBy(o => o.Check.Test))
+                {
+                    var bad = group.Where(o => !o.Passed).ToList();
+                    passed += group.Count() - bad.Count;
+                    failed += bad.Count;
+                    if (bad.Count == 0) { if (verbose) env.Out.WriteLine($"  ✓ {group.Key}"); continue; }
+                    env.Out.WriteLine($"  ✗ {group.Key}");
+                    foreach (var o in bad)
+                        env.Out.WriteLine($"      {display}:{o.Check.Line}: {o.Check.Describe()} — got {(o.Allowed ? "allow" : "deny")}");
+                }
+                if (!verbose && failed == 0) env.Out.WriteLine($"  ✓ {outcomes.Count} checks passed");
+            }
+            env.Out.WriteLine(failed == 0 ? $"{passed} checks passed" : $"{passed} checks passed, {failed} failed");
+            return failed == 0;
+        }
+
         public async Task<int> DeployAsync(CancellationToken ct)
         {
             var locals = LoadAll();          // nothing is deployed unless every file is valid
+            if (!args.Flag("skip-tests") && locals.Any(l => RequireConfig().TestsPath(l.Subsystem) is not null)
+                && !await RunTestsAsync(locals, verbose: false, ct))
+                throw new CliException("Tests failed; nothing was deployed (--skip-tests to deploy anyway).");
             var client = await ClientAsync(ct);
             var dryRun = args.Flag("dry-run");
             var note = args.Value("message") ?? DefaultNote();
@@ -311,6 +887,101 @@ internal static class CliApp
             }
             return 0;
         }
+
+        /// <summary>The subsystems for history/rollback: --only, else the configured files, else both.</summary>
+        private IReadOnlyList<string> RemoteSubsystems()
+        {
+            var configured = Config is { } c ? ProjectConfig.Subsystems.Where(c.Rules.ContainsKey).ToList() : [];
+            return Selected(configured.Count > 0 && args.Value("only") is null ? configured : ProjectConfig.Subsystems);
+        }
+
+        public async Task<int> HistoryAsync(string? versionArg, CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var subsystems = RemoteSubsystems();
+
+            if (versionArg is not null)
+            {
+                var sys = Single(subsystems, "rules history <version>");
+                var version = ParseVersion(versionArg);
+                var chosen = await client.GetVersionAsync(sys, version, ct);
+                var active = await client.GetActiveAsync(sys, ct);
+                var text = RuleText.FormatRuleSet(RuleJson.DeserializeRuleSet(chosen.RulesJson));
+                if (active is null || active.Version == version)
+                {
+                    env.Out.WriteLine($"{sys} v{version}{(active?.Version == version ? " (active)" : "")}:");
+                    env.Out.WriteLine(text);
+                    return 0;
+                }
+                env.Out.WriteLine($"{sys} v{version} against the active v{active.Version}:");
+                WriteDiff(RuleText.FormatRuleSet(RuleJson.DeserializeRuleSet(active.RulesJson)), text, $"v{active.Version} (active)", $"v{version}");
+                return 0;
+            }
+
+            foreach (var sys in subsystems)
+            {
+                var versions = await client.GetVersionsAsync(sys, ct);
+                env.Out.WriteLine($"{sys}:");
+                if (versions.Count == 0)
+                {
+                    env.Out.WriteLine("  no versions yet (the app's starting rules apply)");
+                    continue;
+                }
+                foreach (var v in versions.OrderByDescending(v => v.Version))
+                {
+                    var note = v.Note ?? (v.RevertedFromVersion is { } from ? $"Reverted to v{from}" : "");
+                    env.Out.WriteLine(
+                        $"  {(v.IsActive ? "*" : " ")} v{v.Version,-4} {v.CreatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm}  {v.CreatedBy ?? "?",-24}  {note}".TrimEnd());
+                }
+            }
+            env.Out.WriteLine("(* = active)");
+            return 0;
+        }
+
+        public async Task<int> RollbackAsync(string? versionArg, CancellationToken ct)
+        {
+            if (versionArg is null) throw new CliException("Which version? Usage: winche rules rollback <version> [--only database|storage]", 2);
+            var version = ParseVersion(versionArg);
+            var client = await ClientAsync(ct);
+            var sys = Single(RemoteSubsystems(), "rules rollback");
+
+            var target = await client.GetVersionAsync(sys, version, ct);
+            var active = await client.GetActiveAsync(sys, ct);
+            if (active?.Version == version)
+            {
+                env.Out.WriteLine($"{sys}: v{version} is already active.");
+                return 0;
+            }
+
+            env.Out.WriteLine($"{sys}: make v{version} active again{(active is null ? "" : $" (replacing v{active.Version})")}:");
+            WriteDiff(
+                active is null ? "" : RuleText.FormatRuleSet(RuleJson.DeserializeRuleSet(active.RulesJson)),
+                RuleText.FormatRuleSet(RuleJson.DeserializeRuleSet(target.RulesJson)),
+                active is null ? "(no active version)" : $"v{active.Version} (active)", $"v{version}");
+
+            if (!args.Flag("yes"))
+            {
+                if (!env.Interactive) throw new CliException("Pass --yes to roll back without a prompt.", 2);
+                env.Out.Write("Roll back? [y/N] ");
+                var answer = env.In.ReadLine()?.Trim();
+                if (!string.Equals(answer, "y", StringComparison.OrdinalIgnoreCase) && !string.Equals(answer, "yes", StringComparison.OrdinalIgnoreCase))
+                {
+                    env.Out.WriteLine("Not rolled back.");
+                    return 1;
+                }
+            }
+
+            var saved = await client.RevertAsync(sys, version, ct);
+            env.Out.WriteLine($"{sys}: v{version} is active again as v{saved.Version}");
+            return 0;
+        }
+
+        private static int ParseVersion(string text) =>
+            int.TryParse(text.TrimStart('v', 'V'), out var v) && v > 0 ? v : throw new CliException($"'{text}' isn't a version number.", 2);
+
+        private static string Single(IReadOnlyList<string> subsystems, string command) => subsystems.Count == 1
+            ? subsystems[0]
+            : throw new CliException($"{command}: pick one with --only database or --only storage.", 2);
 
         public async Task<int> DiffAsync(CancellationToken ct)
         {
@@ -401,43 +1072,16 @@ internal static class CliApp
         return $"{matches} match{(matches == 1 ? "" : "es")}, {allows} allow{(allows == 1 ? "" : "s")}";
     }
 
-    private static SortedSet<string> UnknownFunctions(RuleSet ruleSet)
-    {
-        var names = new SortedSet<string>(StringComparer.Ordinal);
-        void Expr(RuleExpression x)
-        {
-            switch (x)
-            {
-                case CallExpression c:
-                    if (!RuleFunctions.Names.Contains(c.Name)) names.Add(c.Name);
-                    foreach (var a in c.Args) Expr(a);
-                    break;
-                case MemberExpression m: Expr(m.Target); break;
-                case IndexExpression ix: Expr(ix.Target); Expr(ix.Index); break;
-                case CompareExpression cmp: Expr(cmp.Left); Expr(cmp.Right); break;
-                case AndExpression a: foreach (var o in a.Operands) Expr(o); break;
-                case OrExpression o: foreach (var p in o.Operands) Expr(p); break;
-                case NotExpression n: Expr(n.Operand); break;
-                case InExpression i: Expr(i.Item); Expr(i.Collection); break;
-                case ConditionalExpression cond: Expr(cond.Condition); Expr(cond.Then); Expr(cond.Else); break;
-            }
-        }
-        void Block(MatchBlock b)
-        {
-            foreach (var a in b.Allow) Expr(a.Condition);
-            foreach (var m in b.Matches) Block(m);
-        }
-        foreach (var m in ruleSet.Matches) Block(m);
-        return names;
-    }
+    private static IReadOnlyList<string> UnknownFunctions(RuleSet ruleSet) => RuleSetValidation.UnknownFunctions(ruleSet);
 }
 
 /// <summary>Positional words plus <c>--name value</c> / <c>--flag</c> options.</summary>
 internal sealed class Args
 {
-    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version"];
-    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port"];
-    private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help" };
+    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose", "reauth", "no-browser"];
+    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
+        "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl"];
+    private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project" };
 
     public List<string> Positional { get; } = [];
     private readonly Dictionary<string, string?> _options = new(StringComparer.Ordinal);
