@@ -173,6 +173,11 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         Assert.True(key.Length > 0, wrong.Out + wrong.Err);
         var right = await Run(null, "2fa", "enable", "--code", Totp(key));
         Assert.True(right.Exit == 0, right.Out + right.Err);
+        // Turning it on ends the account's other sessions, not this one: the CLI carries on (after the console's
+        // 10-second session check comes round).
+        await Task.Delay(TimeSpan.FromSeconds(11));
+        var after = await Run(null, "tokens:list");
+        Assert.True(after.Exit == 0, after.Err);
         Assert.Contains("Two-step sign-in is on", right.Out);
         Assert.Matches(@"\n  \S+", right.Out[right.Out.IndexOf("safe", StringComparison.Ordinal)..]);   // recovery codes
     }

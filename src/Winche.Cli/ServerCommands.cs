@@ -71,7 +71,11 @@ internal static partial class CliApp
                     throw new CliException($"--url {url} isn't an http(s) address.", 2);
                 return u.AbsolutePath.Contains("/_console/", StringComparison.Ordinal) ? CredentialStore.ServerOf(u) : new Uri(u, "_console/");
             }
-            return CredentialStore.ServerOf(ConsoleUrl());
+            if (Config is not null || args.Value("console") is not null || args.Value("project") is not null || env.GetVariable("WINCHE_CONSOLE") is not null)
+                return CredentialStore.ServerOf(ConsoleUrl());
+            // No project here yet: the one server you're signed in to (right after winche setup, say).
+            var servers = new CredentialStore(env.ConfigDirectory).All().Keys.ToList();
+            return servers.Count == 1 ? new Uri(servers[0].TrimEnd('/') + "/") : CredentialStore.ServerOf(ConsoleUrl());
         }
 
         // ----- setup -------------------------------------------------------------------------------
@@ -120,9 +124,9 @@ internal static partial class CliApp
 
             env.Out.WriteLine();
             env.Out.WriteLine("Next:");
+            env.Out.WriteLine($"  winche init --console {CredentialStore.Key(console)}   # this folder's project");
             env.Out.WriteLine("  winche 2fa enable                    # changing settings needs two-step sign-in (unless the server turns that off)");
             env.Out.WriteLine("  winche products:start database       # and storage, authentication, functions");
-            env.Out.WriteLine($"  winche init --console {CredentialStore.Key(console)}");
             return 0;
         }
 
