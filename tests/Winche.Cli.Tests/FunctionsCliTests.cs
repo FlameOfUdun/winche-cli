@@ -64,6 +64,17 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
                 "/_console/api/tokens/current" => (HttpStatusCode.NoContent, ""),
                 "/_console/api/functions/secrets" => (HttpStatusCode.OK, """{ "available": true, "secrets": [{ "name": "MAIL_KEY", "isSet": true, "setAt": "2026-11-12T20:00:00Z", "setBy": "ann@example.com", "usedBy": ["sendReport"] }, { "name": "SA_JSON", "isSet": false, "setAt": null, "setBy": null, "usedBy": [] }] }"""),
                 "/_console/api/functions/secrets/MAIL_KEY" or "/_console/api/functions/secrets/SA_JSON" => (HttpStatusCode.NoContent, ""),
+                "/_console/api/secrets/sources" => (HttpStatusCode.OK, """
+                    { "available": true, "appCredentials": false,
+                      "sources": [{ "name": "aws-sm", "title": "AWS Secrets Manager", "hint": "a secret's ARN or its name", "key": "secrets.source.aws" },
+                                  { "name": "aws-ssm", "title": "AWS Parameter Store", "hint": "a parameter's name", "key": "secrets.source.aws" }],
+                      "keys": [{ "name": "secrets.source.aws", "title": "AWS access key", "isSet": false, "setAt": null, "setBy": null, "sources": ["aws-sm", "aws-ssm"],
+                                 "fields": [{ "name": "accessKeyId", "title": "Access key ID", "secret": false, "required": true },
+                                            { "name": "secretAccessKey", "title": "Secret access key", "secret": true, "required": true },
+                                            { "name": "region", "title": "Region", "secret": false, "required": false }] }] }
+                    """),
+                "/_console/api/secrets/test" => (HttpStatusCode.OK, """{ "ok": false, "problem": "AWS Parameter Store has nothing at /app/none.", "code": "not-found" }"""),
+                "/_console/api/secrets/keys/secrets.source.aws" => (HttpStatusCode.NoContent, ""),
                 _ => (HttpStatusCode.NotFound, "{}"),
             };
             return new HttpResponseMessage(answer.Item1) { Content = new StringContent(answer.Item2, Encoding.UTF8, "application/json") };
@@ -188,6 +199,44 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         (exit, _, err) = await Run(console, Ci, "functions", "secrets:remove", "NOPE");
         Assert.Equal(1, exit);
         Assert.Contains("There's no secret NOPE", err);
+    }
+
+    [Fact]
+    public async Task Secrets_can_be_references_to_aws_tested_and_read_with_the_projects_own_key()
+    {
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "console": "https://api.example.com/_console" }""");
+        string? Ci(string v) => v == "WINCHE_TOKEN" ? "wct_ci" : null;
+        var console = new FakeConsole();
+
+        var (exit, output, err) = await Run(console, Ci, "functions", "secrets:set", "MAIL_KEY", "--ref", "aws-ssm:/app/mail#key");
+        Assert.True(exit == 0, err);
+        var put = JsonNode.Parse(console.Requests.Last().Body!)!;
+        Assert.Equal("aws-ssm:/app/mail#key", put["reference"]!.GetValue<string>());
+        Assert.Null(put["value"]);
+        Assert.Contains("read from aws-ssm:/app/mail#key", output);
+        (exit, _, err) = await Run(console, Ci, "functions", "secrets:set", "MAIL_KEY", "--ref", "no-source");
+        Assert.Equal(2, exit);
+        Assert.Contains("isn't a reference", err);
+
+        (exit, output, err) = await Run(console, Ci, "secrets:sources");
+        Assert.True(exit == 0, err);
+        Assert.Contains("aws-ssm:   AWS Parameter Store", output);
+        Assert.Contains("the project's AWS access key: not set", output);
+
+        (exit, _, err) = await Run(console, Ci, "secrets:test", "aws-ssm:/app/none");
+        Assert.Equal(1, exit);
+        Assert.Contains("has nothing at /app/none", err);
+
+        (exit, _, err) = await Run(console, Ci, "secrets:key", "aws", "--region", "eu-west-2");
+        Assert.Equal(2, exit);
+        Assert.Contains("--access-key-id <Access key ID> is needed", err);
+        (exit, _, err) = await Run(console, Ci, "secrets:key", "aws", "--access-key-id", "AKIDWARDS");
+        Assert.Equal(2, exit);
+        Assert.Contains("WINCHE_SECRET", err);   // the secret key: never an option
+        (exit, output, err) = await Run(console, v => v == "WINCHE_SECRET" ? "s3cr3t" : Ci(v), "secrets:key", "aws", "--access-key-id", "AKIDWARDS", "--region", "eu-west-2");
+        Assert.True(exit == 0, err);
+        var key = JsonNode.Parse(console.Requests.Last().Body!)!["values"]!;
+        Assert.Equal(("AKIDWARDS", "s3cr3t", "eu-west-2"), (key["accessKeyId"]!.GetValue<string>(), key["secretAccessKey"]!.GetValue<string>(), key["region"]!.GetValue<string>()));
     }
 
     [Theory]

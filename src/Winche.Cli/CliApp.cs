@@ -51,7 +51,13 @@ internal static partial class CliApp
           projects:archive | projects:restore | projects:delete <id>
                                Archive a project (refused until restored), or delete an archived one for good
           secrets, secrets:set smtp-password | keycloak-sync --provider <name>
-                               The project's sign-in secrets (the value from WINCHE_SECRET, or typed unseen)
+                               The project's sign-in secrets (the value from WINCHE_SECRET, or typed unseen; or
+                               --ref aws-sm:<ARN or name>[#field] | aws-ssm:<parameter>: read from AWS instead)
+          secrets:sources      Where secrets can be read from besides the server, and the project's own keys for them
+          secrets:key <name>   Set the project's own key for a source (aws: --access-key-id, --region; the secret key
+                               from WINCHE_SECRET or typed unseen; --clear removes it)
+          secrets:test <reference>
+                               Read a reference now: whether it works (never the value)
           webhooks:secret <id> A webhook's signing secret (--rotate: a new one)
           users, users:disable | users:enable | users:sign-out <email or uid>
                                Your apps' users (--search, --limit)
@@ -63,7 +69,7 @@ internal static partial class CliApp
           login:approve <code> Allow a CLI waiting with winche login --no-browser, as you
           server settings pull | diff | deploy
                                The server's own settings as files (server admins)
-          server secrets, server secrets:set <name>   The server's secrets (WINCHE_SECRET, or typed unseen)
+          server secrets, server secrets:set <name>   The server's secrets (WINCHE_SECRET, or typed unseen; or --ref)
           server users, server users:disable | server users:enable | server users:sign-out <email>
                                The console's accounts
           tokens:list          The project's CI tokens
@@ -83,7 +89,8 @@ internal static partial class CliApp
                                Deploy the functions folder through the console, as you (winche login) or a CI token
           functions secrets    The secrets functions read (ctx.secrets): set or not, by whom, which functions use them
           functions secrets:set <NAME>
-                               Add or replace one (the value from WINCHE_SECRET, --from-file <path>, or typed unseen)
+                               Add or replace one (the value from WINCHE_SECRET, --from-file <path>, or typed unseen;
+                               or --ref aws-ssm:/app/key: read from AWS when functions run)
           functions secrets:remove <NAME>
                                Remove one
           assets init [<dir>]  Make an assets folder (default assets/), assets.rules and its tests, and add them to winche.json
@@ -192,6 +199,9 @@ internal static partial class CliApp
                 "projects:delete" => await run.ProjectsChangeAsync("delete", Arg(1), ct),
                 "secrets" => await run.SecretsAsync(null, ct),
                 "secrets:set" => await run.SecretsAsync(Arg(1) ?? throw new CliException("Usage: winche secrets:set smtp-password | keycloak-sync --provider <name>", 2), ct),
+                "secrets:sources" => await run.SecretSourcesAsync("sources", null, ct),
+                "secrets:key" => await run.SecretSourcesAsync("key", Arg(1), ct),
+                "secrets:test" => await run.SecretSourcesAsync("test", Arg(1), ct),
                 "webhooks:secret" => await run.WebhookSecretAsync(Arg(1), ct),
                 "server settings pull" or "server settings diff" or "server settings deploy" => await run.ServerSettingsAsync(Arg(2)!, ct),
                 "server secrets" => await run.ServerSecretsAsync(null, ct),
@@ -1215,7 +1225,8 @@ internal sealed class Args
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
         "role", "sdk", "android-package", "apple-bundle-id", "web-origin",
-        "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel"];
+        "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel",
+        "ref", "access-key-id"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project", ["-f"] = "follow" };
 
     public List<string> Positional { get; } = [];

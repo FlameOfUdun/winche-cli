@@ -155,11 +155,11 @@ internal static partial class CliApp
             foreach (var s in list)
             {
                 var set = s!["isSet"]?.GetValue<bool>() == true
-                    ? $"set {s["setAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd}{(s["setBy"] is { } by ? $" by {by}" : "")}" : "NOT SET";
+                    ? $"{(s["reference"] is { } r ? $"from {r}, " : "")}set {s["setAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd}{(s["setBy"] is { } by ? $" by {by}" : "")}" : "NOT SET";
                 var used = s["usedBy"]?.AsArray().Select(u => u!.ToString()).ToList() ?? [];
                 env.Out.WriteLine($"  {s["name"],-28} {set,-36} {(used.Count == 0 ? "no function declares it" : "used by " + string.Join(", ", used))}");
             }
-            env.Out.WriteLine("Add or replace one: winche functions secrets:set <NAME>   Remove one: winche functions secrets:remove <NAME>");
+            env.Out.WriteLine("Add or replace one: winche functions secrets:set <NAME> [--ref aws-ssm:/app/key]   Remove one: winche functions secrets:remove <NAME>");
             return 0;
         }
 
@@ -170,6 +170,13 @@ internal static partial class CliApp
         public async Task<int> FunctionSecretSetAsync(string name, CancellationToken ct)
         {
             CheckSecretName(name);
+            if (Reference() is { } reference)
+            {
+                var c = await ClientAsync(ct);
+                await OkAsync(c.SendAsync(HttpMethod.Put, $"api/functions/secrets/{name}", new { reference }, ct), "Not set");
+                env.Out.WriteLine($"Set {name}: read from {reference} when functions run. Check it: winche secrets:test {reference}");
+                return 0;
+            }
             string value;
             if (args.Value("from-file") is { } file)
             {
@@ -218,16 +225,22 @@ internal static partial class CliApp
                 env.Out.WriteLine($"  smtp-password              {Described(signin["smtpPassword"])}");
                 foreach (var (provider, info) in signin["syncSecrets"]?.AsObject() ?? [])
                     env.Out.WriteLine($"  keycloak-sync --provider {provider,-12} {Described(info)}");
-                if (!listOnly) env.Out.WriteLine("Set one: winche secrets:set <name> (the value from WINCHE_SECRET, or typed)");
+                if (!listOnly) env.Out.WriteLine("Set one: winche secrets:set <name> (the value from WINCHE_SECRET, or typed; or --ref aws-ssm:/app/key)");
                 return 0;
             }
+            var reference = Reference();
             object body = name switch
             {
-                "smtp-password" => new { settings = signin["settings"], smtpPassword = SecretValue("SMTP password"), reason = Reason("Set the SMTP password"), basedOn = Version(signin) },
-                "keycloak-sync" => new
+                "smtp-password" => new
                 {
-                    settings = signin["settings"], reason = Reason($"Set {args.Value("provider")}'s Keycloak sync secret"), basedOn = Version(signin),
-                    syncSecrets = new Dictionary<string, string> { [args.Value("provider") ?? throw new CliException("--provider <name>: whose Keycloak sync (see winche secrets).", 2)] = SecretValue("Keycloak client secret") },
+                    settings = signin["settings"], reason = Reason("Set the SMTP password"), basedOn = Version(signin),
+                    smtpPassword = reference is null ? SecretValue("SMTP password") : null, smtpPasswordReference = reference,
+                },
+                "keycloak-sync" when (args.Value("provider") ?? throw new CliException("--provider <name>: whose Keycloak sync (see winche secrets).", 2)) is var provider => new
+                {
+                    settings = signin["settings"], reason = Reason($"Set {provider}'s Keycloak sync secret"), basedOn = Version(signin),
+                    syncSecrets = reference is null ? new Dictionary<string, string> { [provider] = SecretValue("Keycloak client secret") } : null,
+                    syncSecretReferences = reference is null ? null : new Dictionary<string, string> { [provider] = reference },
                 },
                 _ => throw new CliException($"'{name}' isn't a secret here: smtp-password, keycloak-sync --provider <name>.", 2),
             };
@@ -237,7 +250,79 @@ internal static partial class CliApp
         }
 
         private static string Described(JsonNode? info) => info is JsonObject o && o["setAt"] is { } at
-            ? $"set {at.GetValue<DateTimeOffset>():yyyy-MM-dd} by {o["setBy"]}" : "not set";
+            ? $"{(o["reference"] is { } r ? $"from {r}, " : "")}set {at.GetValue<DateTimeOffset>():yyyy-MM-dd} by {o["setBy"]}" : "not set";
+
+        /// <summary>
+        /// <c>--ref source:locator[#field]</c>: the secret is read from there (AWS Secrets Manager, Parameter Store, …)
+        /// instead of a value kept on the server. Null without it.
+        /// </summary>
+        private string? Reference()
+        {
+            if (args.Value("ref") is not { } text) return null;
+            if (Winche.Secrets.SecretReference.Parse(text, out var problem) is null) throw new CliException(problem!, 2);
+            return text.Trim();
+        }
+
+        /// <summary>
+        /// <c>winche secrets:sources</c>: where this project's secrets can be read from besides the server, and its own
+        /// keys for those places. <c>secrets:key &lt;name&gt;</c> sets one (fields as --options, the secret one from
+        /// WINCHE_SECRET or typed unseen; <c>--clear</c> removes it). <c>secrets:test &lt;reference&gt;</c> reads one now.
+        /// </summary>
+        public async Task<int> SecretSourcesAsync(string verb, string? name, CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var info = await OkAsync(client.SendAsync(HttpMethod.Get, "api/secrets/sources", null, ct), "Can't read where secrets come from");
+            var keys = info["keys"]?.AsArray() ?? [];
+            switch (verb)
+            {
+                case "sources":
+                    var sources = info["sources"]?.AsArray() ?? [];
+                    if (sources.Count == 0) { env.Out.WriteLine("This server reads secrets from no other place: each is a value kept on it."); return 0; }
+                    foreach (var s in sources) env.Out.WriteLine($"  {s!["name"] + ":",-10} {s["title"]}: {s["hint"]}");
+                    foreach (var k in keys)
+                        env.Out.WriteLine($"  key {KeyShortName(k!),-6} the project's {k["title"]}: {(k["isSet"]?.GetValue<bool>() == true ? $"set {k["setAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd} by {k["setBy"]}" : "not set")}");
+                    env.Out.WriteLine(info["appCredentials"]?.GetValue<bool>() == true
+                        ? "References without the project's key are read with the server's own credentials (you're a server admin)."
+                        : "References are read with the project's own key: set it with winche secrets:key <name> (the server's own credentials are for its admins).");
+                    env.Out.WriteLine("Use one: winche functions secrets:set NAME --ref aws-ssm:/app/key   (also secrets:set, server secrets:set)");
+                    return 0;
+                case "test":
+                    if (name is null) throw new CliException("Usage: winche secrets:test <reference>, e.g. aws-ssm:/app/key", 2);
+                    if (Winche.Secrets.SecretReference.Parse(name, out var problem) is null) throw new CliException(problem!, 2);
+                    var tested = await OkAsync(client.SendAsync(HttpMethod.Post, "api/secrets/test", new { reference = name }, ct), "Not tested");
+                    if (tested["ok"]?.GetValue<bool>() == true) { env.Out.WriteLine($"{name}: read just now, it works."); return 0; }
+                    throw new CliException($"{name}: {tested["problem"]}");
+                case "key":
+                    var key = keys.FirstOrDefault(k => KeyShortName(k!) == name || k!["name"]?.ToString() == name)
+                        ?? throw new CliException($"Usage: winche secrets:key <{string.Join("|", keys.Select(k => KeyShortName(k!)))}> (see winche secrets:sources)", 2);
+                    var keyName = key["name"]!.ToString();
+                    if (args.Flag("clear"))
+                    {
+                        Confirm($"Remove the project's {key["title"]}? References read with it stop working.");
+                        await OkAsync(client.SendAsync(HttpMethod.Delete, $"api/secrets/keys/{Uri.EscapeDataString(keyName)}", null, ct), "Not removed");
+                        env.Out.WriteLine($"Removed the project's {key["title"]}.");
+                        return 0;
+                    }
+                    var values = new Dictionary<string, string>();
+                    foreach (var f in key["fields"]?.AsArray() ?? [])
+                    {
+                        var field = f!["name"]!.ToString();
+                        var option = string.Concat(field.Select(c => char.IsUpper(c) ? "-" + char.ToLowerInvariant(c) : c.ToString()));
+                        var value = f["secret"]?.GetValue<bool>() == true
+                            ? env.GetVariable("WINCHE_SECRET") ?? (env.Interactive ? SecretValue(f["title"]!.ToString()) : throw new CliException($"Set WINCHE_SECRET to the {f["title"]}: there's no terminal to ask in.", 2))
+                            : args.Value(option) ?? (f["required"]?.GetValue<bool>() == true ? throw new CliException($"--{option} <{f["title"]}> is needed.", 2) : null);
+                        if (!string.IsNullOrWhiteSpace(value)) values[field] = value;
+                    }
+                    await OkAsync(client.SendAsync(HttpMethod.Put, $"api/secrets/keys/{Uri.EscapeDataString(keyName)}", new { values }, ct), "Not set");
+                    env.Out.WriteLine($"Set the project's {key["title"]}: references are read with it from now on.");
+                    return 0;
+                default:
+                    throw new CliException("Usage: winche secrets:sources | secrets:key <name> | secrets:test <reference>", 2);
+            }
+        }
+
+        /// <summary>secrets.source.aws → aws.</summary>
+        private static string KeyShortName(JsonNode key) => key["name"]!.ToString().Replace(Winche.Secrets.SecretStore.SourcePrefix, "");
 
         private string Reason(string fallback) => args.Value("message") ?? fallback;
 
@@ -292,11 +377,17 @@ internal static partial class CliApp
             if (name is null)
             {
                 await SignInSecretsAsync(client, "api/server/auth", null, ct, listOnly: true);
-                foreach (var s in secrets) env.Out.WriteLine($"  {s!["name"],-36} {(s["setAt"] is null ? "not set" : $"set {s["setAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd} by {s["setBy"]}")}  {s["about"]}");
+                foreach (var s in secrets) env.Out.WriteLine($"  {s!["name"],-36} {(s["setAt"] is null ? "not set" : $"{(s["reference"] is { } r ? $"from {r}, " : "")}set {s["setAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd} by {s["setBy"]}")}  {s["about"]}");
                 env.Out.WriteLine("Set one: winche server secrets:set <name> (the value from WINCHE_SECRET, or typed; empty removes it)");
                 return 0;
             }
             if (!secrets.Any(s => s?["name"]?.ToString() == name)) throw new CliException($"'{name}' isn't one of the server's secrets. See: winche server secrets", 2);
+            if (Reference() is { } reference)
+            {
+                await OkAsync(client.SendAsync(HttpMethod.Put, $"api/server/secrets/{Uri.EscapeDataString(name)}", new { reference }, ct), "Not set");
+                env.Out.WriteLine($"Set {name}: read from {reference}.");
+                return 0;
+            }
             var value = env.GetVariable("WINCHE_SECRET") ?? (env.Interactive ? SecretValue(name) : throw new CliException("Set WINCHE_SECRET: there's no terminal to ask in.", 2));
             await OkAsync(client.SendAsync(HttpMethod.Put, $"api/server/secrets/{Uri.EscapeDataString(name)}", new { value }, ct), "Not set");
             env.Out.WriteLine(value.Length == 0 ? $"Removed {name}." : $"Set {name}.");
