@@ -175,6 +175,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         Winche.Functions.Database.DatabaseFunctionsExtensions.AddWincheFunctionsForDatabase(builder.Services);
         Winche.Functions.Storage.StorageFunctionsExtensions.AddWincheFunctionsForStorage(builder.Services);
         Winche.Functions.Auth.AuthFunctionsExtensions.AddWincheFunctionsForAuth(builder.Services);
+        Winche.Functions.Assets.AssetsFunctionsExtensions.AddWincheFunctionsForAssets(builder.Services);
         builder.Services.AddWincheDatabase(o =>
         {
             o.ConnectionString = connection;
