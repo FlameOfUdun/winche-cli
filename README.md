@@ -6,8 +6,14 @@ indexes and functions in your repo, check the rules offline, and deploy them to 
 new version in the console's history (rules and indexes take the git commit as the note unless you pass `-m`),
 so it can be reviewed and reverted there.
 
-There's no published install yet: build it from source (`dotnet build src/Winche.Cli`) and run the `winche` it
-builds.
+## Install
+
+```sh
+dotnet tool install -g Winche.Cli     # then: winche --help
+dotnet tool update -g Winche.Cli      # later, for a new version
+```
+
+It needs the .NET 10 runtime. The current version is 2.0.0.
 
 ## Commands
 
