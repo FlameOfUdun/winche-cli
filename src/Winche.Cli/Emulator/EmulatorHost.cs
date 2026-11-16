@@ -303,11 +303,17 @@ internal sealed class EmulatorHost : IAsyncDisposable
             try
             {
                 var files = FunctionsFolder.Read(folder);
-                var fingerprint = System.Text.Json.JsonSerializer.Serialize(files);
+                var assets = FunctionsFolder.HashAssets(folder);
+                var fingerprint = System.Text.Json.JsonSerializer.Serialize(new { files, assets = assets.ToDictionary(a => a.Key, a => a.Value.Entry.Hash) });
                 if (fingerprint == last) return;
                 last = fingerprint;
-                var d = await functions.DeployAsync(files, first ? $"{name}/ at start" : $"{name}/ saved", "emulator");
-                _out.WriteLine($"{DateTime.Now:HH:mm:ss} {(first ? "λ" : "↻")} functions v{d.Version}: {(d.Functions.Count == 0 ? "none exported" : string.Join(", ", d.Functions.Select(f => $"{f.Name} ({f.Trigger.Describe()})")))}");
+                var missing = (await functions.MissingAssetsAsync([.. assets.Values.Select(a => a.Entry.Hash)])).ToHashSet();
+                foreach (var (_, (entry, file)) in assets)
+                    if (missing.Remove(entry.Hash)) await functions.PutAssetAsync(await File.ReadAllBytesAsync(file), entry.Hash);
+                var d = await functions.DeployAsync(files, first ? $"{name}/ at start" : $"{name}/ saved", "emulator",
+                    assets: assets.ToDictionary(a => a.Key, a => a.Value.Entry));
+                _out.WriteLine($"{DateTime.Now:HH:mm:ss} {(first ? "λ" : "↻")} functions v{d.Version}: {(d.Functions.Count == 0 ? "none exported" : string.Join(", ", d.Functions.Select(f => $"{f.Name} ({f.Trigger.Describe()})")))}"
+                    + (assets.Count == 0 ? "" : $" · {assets.Count} asset{(assets.Count == 1 ? "" : "s")}"));
             }
             catch (Winche.Functions.FunctionDeployException ex)
             {

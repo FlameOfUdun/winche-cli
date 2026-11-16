@@ -196,9 +196,16 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
     public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PutAsync(string path, object body, string what, CancellationToken ct) =>
         SendJsonAsync(HttpMethod.Put, path, body, what, ct);
 
-    private async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> SendJsonAsync(HttpMethod method, string path, object body, string what, CancellationToken ct)
+    /// <summary>PUTs raw bytes (an asset), like <see cref="PostAsync"/>.</summary>
+    public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PutBytesAsync(string path, byte[] content, string what, CancellationToken ct) =>
+        SendContentAsync(HttpMethod.Put, path, new ByteArrayContent(content) { Headers = { ContentType = new MediaTypeHeaderValue("application/octet-stream") } }, what, ct);
+
+    private Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> SendJsonAsync(HttpMethod method, string path, object body, string what, CancellationToken ct) =>
+        SendContentAsync(method, path, JsonContent.Create(body), what, ct);
+
+    private async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> SendContentAsync(HttpMethod method, string path, HttpContent content, string what, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(method, new Uri(console, path)) { Content = JsonContent.Create(body) };
+        using var request = new HttpRequestMessage(method, new Uri(console, path)) { Content = content };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         HttpResponseMessage response;
         try { response = await http.SendAsync(request, ct); }

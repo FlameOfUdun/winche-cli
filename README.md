@@ -330,6 +330,9 @@ readable by you only.
 `winche functions deploy` also sends the project's console pages: the web files (`.html`, `.css`, `.js`, `.svg`, images,
 fonts) of the folders `consolePage({ files })` names. Binary files go as base64.
 
+It sends the functions folder's `assets/` folder too (`ctx.assets` in functions): it asks the console which contents
+it doesn't have yet (by SHA-256) and uploads only those, so unchanged fonts or translations aren't sent again.
+
 ### Function secrets
 
 Functions read API keys and passwords with `ctx.secrets.get("NAME")`, declaring them in their options
