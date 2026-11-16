@@ -18,6 +18,12 @@ Winche.Core.ServiceCollectionExtensions.AddWincheConfig(builder.Services, o => {
 builder.Services.AddWincheDatabase(cfg => { cfg.ConnectionString = wincheConn; cfg.UseSettings(); });
 builder.Services.AddWincheStorage(opts => { opts.ConnectionString = wincheConn; opts.UseSettings(); });
 builder.Services.AddSingleton<IArchive, NoOpArchive>();
+// Assets, their contents in memory.
+Winche.Assets.AssetsServiceCollectionExtensions.AddWincheAssets(builder.Services, o =>
+{
+    o.ConnectionString = wincheConn;
+    o.UseArchive(_ => new MemoryContentArchive());
+});
 
 // The console's accounts: their own schema in the console's database.
 await ConsoleAccountsHost.PrepareAsync(consoleConn);
@@ -33,6 +39,7 @@ builder.Services.AddWincheConsole(o =>
     if (builder.Configuration["TestHost:ProjectSetup"] == "true") o.UseProjectSetup(carryOver: false);
     o.AddDatabaseTab(b => b.UseRulesEditor());
     o.AddStorageTab(b => b.UseRulesEditor());
+    o.AddAssetsTab(b => b.UseRulesEditor());
 });
 
 var app = builder.Build();

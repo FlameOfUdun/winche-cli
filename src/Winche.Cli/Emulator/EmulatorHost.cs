@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Testcontainers.PostgreSql;
+using Winche.Assets;
+using Winche.Assets.AspNetCore;
 using Winche.Auth.AspNetCore;
 using Winche.Auth.DependencyInjection;
 using Winche.Core;
@@ -38,6 +40,10 @@ internal sealed record EmulatorOptions
     public string? DataDirectory { get; init; }
     public string? DatabaseRules { get; init; }
     public string? StorageRules { get; init; }
+    public string? AssetsRules { get; init; }
+    /// <summary>An assets folder to publish at start and again whenever it's saved, to <see cref="AssetsChannel"/>.</summary>
+    public string? Assets { get; init; }
+    public string AssetsChannel { get; init; } = "production";
     public bool Quiet { get; init; }
     /// <summary>Show the servers' own logs (information and up).</summary>
     public bool Verbose { get; init; }
@@ -83,6 +89,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
     {
         var databaseRules = Load(options.DatabaseRules, "database", output);
         var storageRules = Load(options.StorageRules, "storage", output);
+        var assetsRules = Load(options.AssetsRules, "assets", output);
 
         PostgreSqlContainer? postgres = null;
         var connection = options.ConnectionString;
@@ -191,6 +198,13 @@ internal sealed class EmulatorHost : IAsyncDisposable
                 fs.Root = Path.Combine(data, "storage");
             });
         });
+        // Assets: the assets folder published as releases on its channel (again on every save), in the data folder.
+        builder.Services.AddWincheAssets(o =>
+        {
+            o.ConnectionString = connection;
+            o.UseRules(assetsRules);
+            o.UseArchive(sp => sp.GetRequiredService<FileSystemArchive>());
+        });
         builder.Services.AddCors(c => c.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
         var app = builder.Build();
@@ -207,11 +221,12 @@ internal sealed class EmulatorHost : IAsyncDisposable
         app.MapWincheStorageFileSystem();
         app.MapWincheAuth();
         Winche.Functions.FunctionsEndpoints.MapWincheFunctions(app);
+        app.MapWincheAssets();
         // GET /.well-known/winche, for winche configure: every service runs here; any app id is taken as given (the
         // emulators keep no list of apps).
         var authOptions = app.Services.GetService<Winche.Auth.WincheAuthOptions>();
         app.MapWincheAppSetup(http => new WincheAppSetup(options.ProjectId, null, WincheAppSetup.BaseUrlOf(http.Request),
-            [new("database", "/documents/v1", "/documents/v1/ws"), new("storage", "/files/v1"), new("auth", "/auth/v1"), new("functions", "/functions/v1")],
+            [new("database", "/documents/v1", "/documents/v1/ws"), new("storage", "/files/v1"), new("auth", "/auth/v1"), new("functions", "/functions/v1"), new("assets", "/assets/v1")],
             [.. (authOptions?.IdentityProviders ?? []).Select(p => new WincheAppSetupProvider(p.Name, p.Kind, p.DisplayName ?? p.Name, [.. p.Audiences]))],
             http.Request.Query["app"].FirstOrDefault() is { Length: > 0 } appId ? new WincheAppSetupApp(appId, appId) : null));
 
@@ -232,13 +247,15 @@ internal sealed class EmulatorHost : IAsyncDisposable
         var host = new EmulatorHost(app, postgres, tempData, baseUrl, connection, data, output);
         host.Watch(options.DatabaseRules, WincheDatabaseKeys.RuleEngine);
         host.Watch(options.StorageRules, WincheStorageKeys.RULE_ENGINE_KEY);
+        host.Watch(options.AssetsRules, AssetsServiceCollectionExtensions.RulesKey);
+        if (options.Assets is { } assets) await host.WatchAssetsAsync(assets, options.AssetsChannel);
         if (options.Functions is { } folder) await host.WatchFunctionsAsync(folder, ct);
         return host;
     }
 
-    public void PrintBanner(string? databaseRules, string? storageRules)
+    public void PrintBanner(string? databaseRules, string? storageRules, string? assetsRules = null)
     {
-        var rules = string.Join(", ", new[] { databaseRules, storageRules }.Where(r => r is not null).Select(r => Path.GetFileName(r!)));
+        var rules = string.Join(", ", new[] { databaseRules, storageRules, assetsRules }.Where(r => r is not null).Select(r => Path.GetFileName(r!)));
         _out.WriteLine();
         _out.WriteLine($"Winche emulator is running{(rules.Length > 0 ? $" — rules from {rules}, reloaded on save" : " — no rules files, so everything is denied")}");
         _out.WriteLine();
@@ -247,6 +264,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         _out.WriteLine($"  Storage           {BaseUrl}/files/v1");
         _out.WriteLine($"  Auth              {BaseUrl}/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)");
         _out.WriteLine($"  Functions         {BaseUrl}/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)");
+        _out.WriteLine($"  Assets            {BaseUrl}/assets/v1/channels/<channel>   (the assets folder, on save; winche assets init makes one)");
         _out.WriteLine($"  Postgres          {(TemporaryDatabase ? "temporary (gone when the emulator stops)" : "the one you passed with --pg")}");
         _out.WriteLine();
         _out.WriteLine("  Sign in as anyone with an unsigned token:");
@@ -347,6 +365,66 @@ internal sealed class EmulatorHost : IAsyncDisposable
         _watchers.Add(watcher);
     }
 
+    /// <summary>
+    /// Publishes the assets folder as a release on <paramref name="channel"/> now and whenever a file in it is saved
+    /// (only when something changed), as <c>winche assets deploy</c> would.
+    /// </summary>
+    private async Task WatchAssetsAsync(string folder, string channel)
+    {
+        var assets = _app.Services.GetRequiredService<WincheAssets>();
+        var name = Path.GetFileName(folder);
+        var gate = new SemaphoreSlim(1, 1);
+        async Task PublishAsync(bool first)
+        {
+            await gate.WaitAsync();
+            try
+            {
+                List<AssetsFolder.Entry> local;
+                try { local = AssetsFolder.Read(folder); }
+                catch (CliException ex) { _out.WriteLine($"{DateTime.Now:HH:mm:ss} ✗ assets: {ex.Message}"); return; }
+                if (await assets.ChannelsAsync() is var channels && channels.FirstOrDefault(c => c.Name == channel) is { } current
+                    && await assets.ReleaseAsync(current.Release) is { } release
+                    && release.Files.Count == local.Count && local.All(e => release.Files.TryGetValue(e.Path, out var f) && f.Hash == e.Hash))
+                {
+                    if (first) _out.WriteLine($"{DateTime.Now:HH:mm:ss} 📦 assets: {channel} is release #{release.Number} ({local.Count} files)");
+                    return;
+                }
+                var missing = (await assets.MissingAsync([.. local.Select(e => e.Hash)])).ToHashSet();
+                foreach (var e in local)
+                    if (missing.Remove(e.Hash))
+                        await using (var stream = File.OpenRead(e.File)) await assets.PutContentAsync(stream, e.Hash);
+                var published = await assets.PublishAsync(new AssetPublishRequest(
+                    local.ToDictionary(e => e.Path, e => new AssetFile(e.Hash, e.Size, ""), StringComparer.Ordinal),
+                    first ? $"{name}/ at start" : $"{name}/ saved", channel), "emulator");
+                _out.WriteLine($"{DateTime.Now:HH:mm:ss} {(first ? "📦" : "↻")} assets: release #{published.Number} on {channel} ({local.Count} files)");
+            }
+            catch (AssetsException ex)
+            {
+                _out.WriteLine($"{DateTime.Now:HH:mm:ss} ✗ assets: {ex.Message}");
+                foreach (var p in ex.Problems) _out.WriteLine("    " + p);
+            }
+            catch (IOException) { /* mid-save: the next event publishes */ }
+            finally { gate.Release(); }
+        }
+        await PublishAsync(first: true);
+        var watcher = new FileSystemWatcher(folder) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size };
+        CancellationTokenSource? pending = null;
+        var debounce = new object();
+        void Changed(object? _, FileSystemEventArgs e)
+        {
+            if (e.FullPath.Contains($"{Path.DirectorySeparatorChar}.")) return;   // hidden files, editors' temp files
+            CancellationTokenSource cts;
+            lock (debounce) { pending?.Cancel(); pending = cts = new CancellationTokenSource(); }
+            _ = Task.Delay(300, cts.Token).ContinueWith(t => { if (!t.IsCanceled) _ = PublishAsync(first: false); }, TaskScheduler.Default);
+        }
+        watcher.Changed += Changed;
+        watcher.Created += Changed;
+        watcher.Deleted += Changed;
+        watcher.Renamed += (s, e) => Changed(s, e);
+        watcher.EnableRaisingEvents = true;
+        _watchers.Add(watcher);
+    }
+
     /// <summary>Re-applies a rules file whenever it's saved; a file with an error leaves the previous rules in force.</summary>
     private void Watch(string? file, string repositoryKey)
     {
@@ -404,7 +482,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
     {
         await next(ctx);
         var path = ctx.Request.Path.Value ?? "";
-        if (!(path.StartsWith("/documents", StringComparison.Ordinal) || path.StartsWith("/files", StringComparison.Ordinal))) return;
+        if (!(path.StartsWith("/documents", StringComparison.Ordinal) || path.StartsWith("/files", StringComparison.Ordinal) || path.StartsWith("/assets", StringComparison.Ordinal))) return;
         var status = ctx.Response.StatusCode;
         var who = WincheCaller.UidOf(await ctx.WincheCallerOf()) is { } uid ? $" as {uid}" : " signed out";
         var shown = Readable(path, "/documents/v1/") ?? Readable(path, "/files/v1/") ?? path;

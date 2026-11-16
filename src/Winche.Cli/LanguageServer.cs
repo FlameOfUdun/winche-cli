@@ -220,7 +220,9 @@ internal sealed class LanguageServer(Stream input, Stream output, CliEnvironment
         }
         if (!testPath.EndsWith(".rules.test", StringComparison.Ordinal)) return null;
         var rules = testPath[..^".test".Length];
-        var subsystem = Path.GetFileName(rules).StartsWith("storage", StringComparison.OrdinalIgnoreCase) ? "storage" : "database";
+        var name = Path.GetFileName(rules);
+        var subsystem = name.StartsWith("storage", StringComparison.OrdinalIgnoreCase) ? "storage"
+            : name.StartsWith("assets", StringComparison.OrdinalIgnoreCase) ? "assets" : "database";
         return (rules, subsystem);
     }
 

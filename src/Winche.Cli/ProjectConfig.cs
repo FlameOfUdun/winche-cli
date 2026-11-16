@@ -9,7 +9,8 @@ namespace Winche.Cli;
 /// {
 ///   "console": "https://api.example.com/_console",
 ///   "projects": { "dev": "http://localhost:5000/_console", "prod": "https://api.example.com/_console" },
-///   "rules": { "database": "database.rules", "storage": "storage.rules" },
+///   "rules": { "database": "database.rules", "storage": "storage.rules", "assets": "assets.rules" },
+///   "assets": { "folder": "assets", "channel": "production" },
 ///   "tests": { "database": "database.rules.test" }
 /// }
 /// </code>
@@ -30,11 +31,13 @@ internal sealed class ProjectConfig
     [JsonPropertyName("projectId")] public string? ProjectId { get; set; }
     /// <summary>The functions folder (winche functions init writes "functions").</summary>
     [JsonPropertyName("functions")] public string? Functions { get; set; }
+    /// <summary>The assets folder and the channel it's published to (winche assets deploy; the emulator serves it).</summary>
+    [JsonPropertyName("assets")] public AssetsConfig? Assets { get; set; }
 
     [JsonIgnore] public string Directory { get; private set; } = "";
     [JsonIgnore] public string? FilePath { get; private set; }
 
-    public static readonly string[] Subsystems = ["database", "storage"];
+    public static readonly string[] Subsystems = ["database", "storage", "assets"];
 
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -73,7 +76,7 @@ internal sealed class ProjectConfig
         config.Rules ??= new(StringComparer.Ordinal);
         foreach (var key in config.Rules.Keys.Concat(config.Tests?.Keys ?? Enumerable.Empty<string>()))
             if (!Subsystems.Contains(key))
-                throw new CliException($"{path}: unknown key '{key}' under rules/tests (expected database or storage).");
+                throw new CliException($"{path}: unknown key '{key}' under rules/tests (expected database, storage or assets).");
         config.FilePath = path;
         config.Directory = Path.GetDirectoryName(path)!;
         return config;
@@ -82,6 +85,9 @@ internal sealed class ProjectConfig
     public string RulesPath(string subsystem) => Path.GetFullPath(Rules[subsystem], Directory);
 
     public string? FunctionsPath => Functions is { } f ? Path.GetFullPath(f, Directory) : null;
+
+    /// <summary>The assets folder, when winche.json names one.</summary>
+    [JsonIgnore] public string? AssetsPath => Assets?.Folder is { } f ? Path.GetFullPath(f, Directory) : null;
 
     [JsonIgnore] public string IndexesPath => Path.GetFullPath(Indexes ?? "database.indexes", Directory);
 
@@ -92,6 +98,13 @@ internal sealed class ProjectConfig
     {
         File.WriteAllText(path, JsonSerializer.Serialize(this, Json) + Environment.NewLine);
     }
+}
+
+/// <summary><c>"assets"</c> in winche.json: the folder published as a release, and the channel moved to it.</summary>
+internal sealed class AssetsConfig
+{
+    [JsonPropertyName("folder")] public string? Folder { get; set; }
+    [JsonPropertyName("channel")] public string? Channel { get; set; }
 }
 
 /// <summary>Which console a command talks to, and the project alias it came from (if any).</summary>

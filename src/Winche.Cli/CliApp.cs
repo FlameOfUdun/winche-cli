@@ -44,7 +44,7 @@ internal static partial class CliApp
           members:add <email>  Add someone (--role Admin|Member|Viewer, default Member); new people get a link
                                to set their password (emailed when the server can send email)
           products             The project's products, and whether they're started
-          products:start <p>…  Start products (database, storage, authentication, functions) and follow their setup
+          products:start <p>…  Start products (database, storage, authentication, functions, assets) and follow their setup
           members:remove <email>  Take someone's access away (the first project: their role, or their invite)
           invites, invites:revoke <email>  The first project's pending invites
           apps:delete <id>     Remove a registered app
@@ -67,7 +67,7 @@ internal static partial class CliApp
           server users, server users:disable | server users:enable | server users:sign-out <email>
                                The console's accounts
           tokens:list          The project's CI tokens
-          tokens:create <name> Make a CI token (--scopes functions,rules,indexes; --days, default 90; --quiet: only it)
+          tokens:create <name> Make a CI token (--scopes functions,rules,indexes,assets; --days, default 90; --quiet: only it)
           tokens:revoke <id>   Revoke a CI token (by id or name)
           settings pull        Write the project's settings into settings/*.json (--only database,storage,auth,…)
           settings diff        How the settings files differ from the project's
@@ -86,6 +86,19 @@ internal static partial class CliApp
                                Add or replace one (the value from WINCHE_SECRET, --from-file <path>, or typed unseen)
           functions secrets:remove <NAME>
                                Remove one
+          assets init [<dir>]  Make an assets folder (default assets/), assets.rules and its tests, and add them to winche.json
+          assets deploy [<dir>]
+                               Publish the assets folder as a new release and move its channel to it (--channel, default
+                               winche.json's or production; -m: the note; --dry-run; --force: publish even if unchanged).
+                               Only contents the server doesn't have are sent.
+          assets diff [<dir>]  How the folder differs from the channel's release
+          assets releases      The releases, newest first
+          assets release <n>   A release's files
+          assets channels      The channels and the release each points at
+          assets channels:set <name> <release>
+                               Point a channel at a release (made if new); an older one is a rollback (-y: don't ask)
+          assets channels:remove <name>
+                               Remove a channel (its releases stay)
           emulators start      Run the database, storage, auth and functions locally (Postgres in Docker; rules and functions reloaded on save)
           emulators exec <cmd> Start the emulators, run <cmd> against them (e.g. your tests), stop, exit with its code
           emulators token <uid> [claim=value …]
@@ -100,8 +113,9 @@ internal static partial class CliApp
                                a project id on the same Winche Server; configure: the project at --url/p/<id>
           --token <token>      A CI token (winche tokens:create, or Project settings → CI tokens) instead of a saved sign-in (or WINCHE_TOKEN)
           --config <path>      winche.json to use (default: the nearest one upward)
-          --only <list>        database, storage, or database,storage (default: every file in winche.json)
-          -m, --message <text> Note for the deployed versions (deploy)
+          --only <list>        database, storage, assets, comma-separated (default: every file in winche.json)
+          -m, --message <text> Note for the deployed versions, or the assets release (deploy)
+          --channel <name>     assets deploy | diff: the channel (default winche.json's "assets.channel", or production)
           --dry-run            Show what deploy would change, without saving
           --force              Deploy even when the console already has these rules
           --skip-tests         Deploy without running the tests first
@@ -139,7 +153,7 @@ internal static partial class CliApp
 
             using var http = new HttpClient(env.Http, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(60) };
             var command = string.Join(' ', a.Positional.Take(
-                a.Positional[0] is "rules" or "emulators" or "functions" or "indexes" or "settings" or "2fa" ? 2
+                a.Positional[0] is "rules" or "emulators" or "functions" or "indexes" or "settings" or "2fa" or "assets" ? 2
                 : a.Positional[0] == "server" ? (a.Positional.ElementAtOrDefault(1) == "settings" ? 3 : 2) : 1));
             string? Arg(int i) => a.Positional.ElementAtOrDefault(i);
             var run = new Run(env, a, http);
@@ -196,7 +210,7 @@ internal static partial class CliApp
                 "logs" => await run.LogsAsync(ct),
                 "products:start" => await run.ProductsStartAsync(a.Positional.Skip(1).ToList(), ct),
                 "tokens:list" => await run.TokensListAsync(ct),
-                "tokens:create" => await run.TokensCreateAsync(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche tokens:create <name> --scopes functions,rules,indexes [--days 90]", 2), ct),
+                "tokens:create" => await run.TokensCreateAsync(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche tokens:create <name> --scopes functions,rules,indexes,assets [--days 90]", 2), ct),
                 "tokens:revoke" => await run.TokensRevokeAsync(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche tokens:revoke <id>", 2), ct),
                 "settings pull" => await run.SettingsPullAsync(ct),
                 "settings diff" => await run.SettingsDiffAsync(ct),
@@ -209,6 +223,14 @@ internal static partial class CliApp
                 "functions secrets" => await run.FunctionSecretsAsync(ct),
                 "functions secrets:set" => await run.FunctionSecretSetAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:set <NAME> [--from-file <path>]", 2), ct),
                 "functions secrets:remove" => await run.FunctionSecretRemoveAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:remove <NAME>", 2), ct),
+                "assets init" => run.AssetsInit(Arg(2)),
+                "assets deploy" => await run.AssetsDeployAsync(Arg(2), ct),
+                "assets diff" => await run.AssetsDiffAsync(Arg(2), ct),
+                "assets releases" => await run.AssetsReleasesAsync(ct),
+                "assets release" => await run.AssetsReleaseAsync(Arg(2) ?? throw new CliException("Usage: winche assets release <number>", 2), ct),
+                "assets channels" => await run.AssetsChannelsAsync(ct),
+                "assets channels:set" => await run.AssetsChannelSetAsync(Arg(2), Arg(3), ct),
+                "assets channels:remove" => await run.AssetsChannelRemoveAsync(Arg(2) ?? throw new CliException("Usage: winche assets channels:remove <name>", 2), ct),
                 "emulators start" => await run.EmulatorsAsync(null, ct),
                 "emulators exec" => await run.EmulatorsAsync(a.Positional.Count > 2 ? string.Join(' ', a.Positional.Skip(2)) : throw new CliException("Usage: winche emulators exec \"<command>\"", 2), ct),
                 "emulators token" => run.Token(a.Positional.Skip(2).ToList()),
@@ -315,7 +337,8 @@ internal static partial class CliApp
             if (File.Exists(path)) throw new CliException($"{ProjectConfig.FileName} already exists here.");
 
             var config = new ProjectConfig { Console = args.Value("console") };
-            foreach (var sys in Selected(ProjectConfig.Subsystems))
+            // Database and storage unless --only names others (assets: winche assets init).
+            foreach (var sys in args.Value("only") is null ? ["database", "storage"] : Selected(ProjectConfig.Subsystems))
             {
                 var file = $"{sys}.rules";
                 var tests = $"{sys}.rules.test";
@@ -338,7 +361,21 @@ internal static partial class CliApp
             return 0;
         }
 
-        private static string Starter(string sys) => sys == "database"
+        private static string Starter(string sys) => sys == "assets"
+            ? """
+              // Who may read which assets (apps only read them; releases are published from the CLI). Nothing is
+              // readable until a rule allows it. `list` decides what a channel's listing shows; `get`, the file itself.
+              // resource: path, size, mimeType, hash, release, channel.
+              //
+              // match translations/{file=**} {
+              //   allow read;
+              // }
+              // match staff/{file=**} {
+              //   allow read: if request.auth.token.role == 'staff';
+              // }
+
+              """
+            : sys == "database"
             ? """
               // Access rules for Winche.Database. Nothing is allowed until a rule grants it.
               // Check with `winche rules validate`; publish with `winche rules deploy`.
@@ -358,7 +395,16 @@ internal static partial class CliApp
 
               """;
 
-        private static string StarterTests(string sys) => sys == "database"
+        private static string StarterTests(string sys) => sys == "assets"
+            ? """
+              // Checks for assets.rules, run by `winche rules test` and before `winche rules deploy`.
+
+              test "nothing is readable without a rule" {
+                deny get secret/notes.txt
+              }
+
+              """
+            : sys == "database"
             ? """
               // Checks for database.rules, run by `winche rules test` and before `winche rules deploy`.
               //
@@ -600,6 +646,9 @@ internal static partial class CliApp
                 DataDirectory = args.Value("data") is { } d ? Path.GetFullPath(d, env.WorkingDirectory) : null,
                 DatabaseRules = Rules("database"),
                 StorageRules = Rules("storage"),
+                AssetsRules = Rules("assets"),
+                Assets = AssetsDir(null) is var adir && Directory.Exists(adir) ? adir : null,
+                AssetsChannel = AssetsChannel(),
                 Functions = FunctionsDir(null) is var fdir && Directory.Exists(fdir) ? fdir : null,
                 Quiet = args.Flag("quiet") || command is not null,
                 Verbose = args.Flag("verbose"),
@@ -610,7 +659,7 @@ internal static partial class CliApp
             await using var host = await Emulator.EmulatorHost.StartAsync(options, env.Out, ct);
             if (command is null)
             {
-                host.PrintBanner(options.DatabaseRules, options.StorageRules);
+                host.PrintBanner(options.DatabaseRules, options.StorageRules, options.AssetsRules);
                 env.Out.WriteLine("Press Ctrl+C to stop.");
                 using var either = CancellationTokenSource.CreateLinkedTokenSource(ct, host.Stopping);
                 try { await Task.Delay(Timeout.Infinite, either.Token); }
@@ -627,6 +676,7 @@ internal static partial class CliApp
             psi.Environment["WINCHE_EMULATOR_HOST"] = new Uri(host.BaseUrl).Authority;
             psi.Environment["WINCHE_DATABASE_URL"] = host.BaseUrl + "/documents/v1";
             psi.Environment["WINCHE_STORAGE_URL"] = host.BaseUrl + "/files/v1";
+            psi.Environment["WINCHE_ASSETS_URL"] = host.BaseUrl + "/assets/v1";
             using var process = System.Diagnostics.Process.Start(psi) ?? throw new CliException($"Couldn't run: {command}");
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct, host.Stopping);
             try
@@ -815,7 +865,7 @@ internal static partial class CliApp
             var wanted = only.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             foreach (var w in wanted)
                 if (!ProjectConfig.Subsystems.Contains(w))
-                    throw new CliException($"--only {w}: expected database or storage.", 2);
+                    throw new CliException($"--only {w}: expected database, storage or assets.", 2);
             var missing = wanted.Where(w => !list.Contains(w)).ToList();
             if (missing.Count > 0)
                 throw new CliException($"{string.Join(", ", missing)} has no rules file in {ProjectConfig.FileName}.");
@@ -1165,7 +1215,7 @@ internal sealed class Args
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
         "role", "sdk", "android-package", "apple-bundle-id", "web-origin",
-        "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file"];
+        "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project", ["-f"] = "follow" };
 
     public List<string> Positional { get; } = [];

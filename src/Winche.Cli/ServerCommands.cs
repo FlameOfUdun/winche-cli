@@ -141,7 +141,7 @@ internal static partial class CliApp
             return products;
         }
 
-        private static readonly string[] ProductNames = ["database", "storage", "authentication", "functions"];
+        private static readonly string[] ProductNames = ["database", "storage", "authentication", "functions", "assets"];
 
         // ----- two-step sign-in --------------------------------------------------------------------
 

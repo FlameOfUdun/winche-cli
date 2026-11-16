@@ -146,7 +146,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
 
     /// <summary>A 401: a CI token that may not do this (or was revoked, or expired), or a sign-in that has ended.</summary>
     private CliException Refused() => token.StartsWith("wct_", StringComparison.Ordinal)
-        ? new CliException("The CI token was refused: a CI token only deploys what its scopes allow (functions, rules, indexes), and stops once revoked or expired.")
+        ? new CliException("The CI token was refused: a CI token only deploys what its scopes allow (functions, rules, indexes, assets), and stops once revoked or expired.")
         : new CliException($"Your sign-in to {console} was refused: it has ended (signed out, everywhere too, or the account was turned off). Run: winche login");
 
     /// <summary>What a refusal says: its message, and its list of problems.</summary>
@@ -196,6 +196,25 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
     public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PutAsync(string path, object body, string what, CancellationToken ct) =>
         SendJsonAsync(HttpMethod.Put, path, body, what, ct);
 
+    /// <summary>GETs <paramref name="path"/>, like <see cref="PostAsync"/>; with <paramref name="missingOk"/>, a 404 comes back too.</summary>
+    public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> GetAsync(string path, string what, CancellationToken ct, bool missingOk = false) =>
+        SendContentAsync(HttpMethod.Get, path, null, what, ct, missingOk);
+
+    /// <summary>DELETEs <paramref name="path"/>, like <see cref="PostAsync"/>; a 404 comes back for the caller to word.</summary>
+    public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> DeleteAsync(string path, string what, CancellationToken ct) =>
+        SendContentAsync(HttpMethod.Delete, path, null, what, ct, missingOk: true);
+
+    /// <summary>PUTs a file's bytes as they're read (large ones too), like <see cref="PostAsync"/>.</summary>
+    public async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PutFileAsync(string path, string file, string what, CancellationToken ct)
+    {
+        await using var stream = File.OpenRead(file);
+        var content = new StreamContent(stream, 1 << 20) { Headers = { ContentType = new MediaTypeHeaderValue("application/octet-stream"), ContentLength = stream.Length } };
+        return await SendContentAsync(HttpMethod.Put, path, content, what, ct);
+    }
+
+    /// <summary>The same console and sign-in, through <paramref name="other"/> (one with a longer timeout, for uploads).</summary>
+    public ConsoleClient Through(HttpClient other) => new(other, console, token);
+
     /// <summary>PUTs raw bytes (an asset), like <see cref="PostAsync"/>.</summary>
     public Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> PutBytesAsync(string path, byte[] content, string what, CancellationToken ct) =>
         SendContentAsync(HttpMethod.Put, path, new ByteArrayContent(content) { Headers = { ContentType = new MediaTypeHeaderValue("application/octet-stream") } }, what, ct);
@@ -203,7 +222,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
     private Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> SendJsonAsync(HttpMethod method, string path, object body, string what, CancellationToken ct) =>
         SendContentAsync(method, path, JsonContent.Create(body), what, ct);
 
-    private async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> SendContentAsync(HttpMethod method, string path, HttpContent content, string what, CancellationToken ct)
+    private async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> SendContentAsync(HttpMethod method, string path, HttpContent? content, string what, CancellationToken ct, bool missingOk = false)
     {
         using var request = new HttpRequestMessage(method, new Uri(console, path)) { Content = content };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -222,6 +241,8 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
                     throw new CliException("Turn on two-step sign-in for your console account first (your account menu in the console).");
                 case HttpStatusCode.Forbidden:
                     throw new CliException($"Your account can't deploy {what}: it needs the console's Admin role.");
+                case HttpStatusCode.NotFound when missingOk && json["error"] is System.Text.Json.Nodes.JsonObject:
+                    break;   // the thing asked for isn't there (the console said so): the caller words it
                 case HttpStatusCode.NotFound:
                     throw new CliException($"The console doesn't manage {what} (the app has no Add{Title(what)}…).");
             }

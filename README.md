@@ -51,7 +51,11 @@ winche indexes deploy -m "why"                           # database.indexes to t
 winche functions init                                    # a functions/ folder: index.ts, deno.json, types for VS Code
 winche functions deploy -m "what changed"                # deploy it through the console, as you (or a CI token)
 winche functions secrets                                 # the secrets functions read (secrets:set NAME, secrets:remove NAME)
-winche emulators start                                   # database, storage, auth and functions locally (no console)
+winche assets init                                       # an assets/ folder, assets.rules and its tests, in winche.json
+winche assets deploy -m "German"                         # publish the folder as a release; its channel points at it
+winche assets diff                                       # the folder against the channel's release
+winche assets channels:set production 12                 # point a channel at a release (an older one: a rollback)
+winche emulators start                                   # database, storage, auth, functions and assets locally (no console)
 winche emulators exec "npm test"                         # …around a command (CI)
 winche emulators token u1 role=admin                     # a sign-in token the emulators accept
 winche configure --url https://api.example.com           # lib/winche_options.dart for a Flutter/Dart app
@@ -59,7 +63,7 @@ winche login:add                                         # another account on th
 winche logout                                            # end the sign-in (logout <email>: just that account)
 ```
 
-Options: `-P/--project <alias|id>`, `--console <url>`, `--token <token>`, `--config <path>`, `--only database|storage`,
+Options: `-P/--project <alias|id>`, `--console <url>`, `--token <token>`, `--config <path>`, `--only database|storage|assets`,
 `-m/--message <note>` (deploy), `--force` (deploy unchanged files too), `--skip-tests` (deploy), `-y/--yes`
 (rollback without a prompt), `--stdout` (rules and indexes pull), `--port <n>` (login, emulators).
 Run `winche --help` for the full list.
@@ -176,7 +180,9 @@ Found in the working directory or the nearest parent; rule file paths are relati
 ```
 
 Optional keys: `"projects"` (below), `"indexes"` (default `database.indexes`), `"functions"` (the functions folder,
-default `functions`; `winche functions init` adds it) and `"projectId"` (the emulators' project id).
+default `functions`; `winche functions init` adds it), `"assets"` (`{ "folder": "assets", "channel": "production" }`;
+`winche assets init` adds it, with `"assets": "assets.rules"` under `"rules"`) and `"projectId"` (the emulators'
+project id).
 
 The rules language is Winche.Rules' — see the **[Rules Language Guide](https://github.com/FlameOfUdun/winche-rules/blob/main/GUIDE.md)**:
 
@@ -350,10 +356,32 @@ sign-in where the console requires it); a CI token can't. In the emulators, secr
 functions folder (`NAME=value` lines, reloaded on save, never deployed; `winche functions init` adds it to
 `.gitignore`).
 
+## Assets
+
+Content your apps download and keep offline (translations, pages, images, videos) lives in a folder of your repository
+and is published as numbered releases. A channel (`production`, `beta`, one per app version…) points apps at one:
+
+```sh
+winche assets init                          # assets/translations/en.json, assets.rules and assets.rules.test
+winche rules deploy --only assets           # who may read which paths (nothing is readable until a rule allows it)
+winche assets deploy -m "German"            # changes from the channel's release, then a new release it points at
+winche assets deploy --channel beta         # another channel
+winche assets diff                          # + added, ~ changed, - removed, against the channel's release
+winche assets releases                      # newest first, with the channels on each
+winche assets release 12                    # its files
+winche assets channels                      # each channel's release
+winche assets channels:set production 11    # back to 11 (asks first; -y doesn't)
+winche assets channels:remove beta          # its releases stay
+```
+
+Deploy hashes every file and sends only what the server doesn't have, streamed, so a large video goes up once whatever
+the releases using it. A folder that's what the channel already has publishes nothing (`--force` makes a new release
+anyway). CI deploys with a token scoped to `assets` (`winche tokens:create ci --scopes assets,rules`).
+
 ## Emulators
 
-`winche emulators start` runs Winche.Database (REST and the live WebSocket), Winche.Storage, Winche Auth and functions in
-one local process, for your app to talk to. There's no console in it: the console is part
+`winche emulators start` runs Winche.Database (REST and the live WebSocket), Winche.Storage, Winche Auth, functions and
+assets (the assets folder published to its channel at start and on every save, `/assets/v1`) in one local process, for your app to talk to. There's no console in it: the console is part
 of Winche Server.
 
 ```text
