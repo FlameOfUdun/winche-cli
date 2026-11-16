@@ -62,6 +62,8 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
                 "/_console/api/cli-login/logout" => (HttpStatusCode.NoContent, ""),
                 "/_console/api/functions/deploy" => (DeployAnswer, DeployReply),
                 "/_console/api/tokens/current" => (HttpStatusCode.NoContent, ""),
+                "/_console/api/functions/secrets" => (HttpStatusCode.OK, """{ "available": true, "secrets": [{ "name": "MAIL_KEY", "isSet": true, "setAt": "2026-11-12T20:00:00Z", "setBy": "ann@example.com", "usedBy": ["sendReport"] }, { "name": "SA_JSON", "isSet": false, "setAt": null, "setBy": null, "usedBy": [] }] }"""),
+                "/_console/api/functions/secrets/MAIL_KEY" or "/_console/api/functions/secrets/SA_JSON" => (HttpStatusCode.NoContent, ""),
                 _ => (HttpStatusCode.NotFound, "{}"),
             };
             return new HttpResponseMessage(answer.Item1) { Content = new StringContent(answer.Item2, Encoding.UTF8, "application/json") };
@@ -144,6 +146,46 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         Assert.Equal("r2", JsonNode.Parse(console.Requests.Single(r => r.Path == "/_console/api/cli-login/logout").Body!)!["refreshToken"]!.GetValue<string>());
     }
 
+    [Fact]
+    public async Task Function_secrets_are_listed_set_from_a_variable_or_a_file_and_removed()
+    {
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "console": "https://api.example.com/_console" }""");
+        string? Ci(string v) => v == "WINCHE_TOKEN" ? "wct_ci" : null;
+        var console = new FakeConsole();
+
+        var (exit, output, err) = await Run(console, Ci, "functions", "secrets");
+        Assert.True(exit == 0, err);
+        Assert.Contains("MAIL_KEY", output);
+        Assert.Contains("set 2026-11-12 by ann@example.com", output);
+        Assert.Contains("used by sendReport", output);
+        Assert.Contains("NOT SET", output);
+
+        (exit, output, err) = await Run(console, v => v == "WINCHE_SECRET" ? "k-123" : Ci(v), "functions", "secrets:set", "MAIL_KEY");
+        Assert.True(exit == 0, err);
+        var put = console.Requests.Last();
+        Assert.Equal((HttpMethod.Put, "/_console/api/functions/secrets/MAIL_KEY", "k-123"), (put.Method, put.Path, JsonNode.Parse(put.Body!)!["value"]!.GetValue<string>()));
+        Assert.Contains("Set MAIL_KEY.", output);
+
+        File.WriteAllText(Path.Combine(_dir, "sa.json"), """{ "type": "service_account" }""");
+        (exit, _, err) = await Run(console, Ci, "functions", "secrets:set", "SA_JSON", "--from-file", "sa.json");
+        Assert.True(exit == 0, err);
+        Assert.Contains("service_account", JsonNode.Parse(console.Requests.Last().Body!)!["value"]!.GetValue<string>());
+
+        (exit, _, err) = await Run(console, Ci, "functions", "secrets:set", "MAIL_KEY");   // no value and no terminal
+        Assert.Equal(2, exit);
+        Assert.Contains("WINCHE_SECRET", err);
+        (exit, _, err) = await Run(console, Ci, "functions", "secrets:set", "mail-key");
+        Assert.Equal(2, exit);
+        Assert.Contains("isn't a secret name", err);
+
+        (exit, output, err) = await Run(console, Ci, "functions", "secrets:remove", "MAIL_KEY");
+        Assert.True(exit == 0, err);
+        Assert.Equal((HttpMethod.Delete, "/_console/api/functions/secrets/MAIL_KEY"), (console.Requests.Last().Method, console.Requests.Last().Path));
+        (exit, _, err) = await Run(console, Ci, "functions", "secrets:remove", "NOPE");
+        Assert.Equal(1, exit);
+        Assert.Contains("There's no secret NOPE", err);
+    }
+
     [Theory]
     [InlineData("https://api.example.com/_console", "https://api.example.com/_console/")]
     [InlineData("https://api.example.com/p/wards/_console/", "https://api.example.com/_console/")]
@@ -173,5 +215,19 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
             "curl -sf -X POST \"$WINCHE_EMULATOR/functions/v1/call/hello\" -H 'Content-Type: application/json' -d '{\"data\":{\"name\":\"Ann\"}}' | grep -q 'Hello Ann' && exit 7");
         Assert.True(exit == 7, output + "\n" + err);
         Assert.Contains("functions v1: hello (called by apps)", output);
+        Assert.Contains(".secrets.local", File.ReadAllText(Path.Combine(_dir, "functions", ".gitignore")));
+
+        // Secrets for the emulator come from functions/.secrets.local, which is never deployed.
+        File.WriteAllText(Path.Combine(_dir, "functions", ".secrets.local"), "# local only\nMAIL_KEY=\"k-local-1\"\n");
+        File.WriteAllText(Path.Combine(_dir, "functions", "index.ts"), """
+            import { callable } from "@winche/functions";
+            export const keyed = callable(async (_d, ctx) => ({ key: ctx.secrets.get("MAIL_KEY") }), { secrets: ["MAIL_KEY"] });
+            """);
+        Assert.DoesNotContain(".secrets.local", FunctionsFolder.Read(Path.Combine(_dir, "functions")).Keys);
+        (exit, output, err) = await Run(new HttpClientHandler(), v => v == "WINCHE_DENO" ? deno : null,
+            "emulators", "exec", "--port", "0", "--pg", fx.ConnectionString, "--data", Path.Combine(_dir, "data2"),
+            "curl -sf -X POST \"$WINCHE_EMULATOR/functions/v1/call/keyed\" -H 'Content-Type: application/json' -d '{}' | grep -q 'k-local-1' && exit 7");
+        Assert.True(exit == 7, output + "\n" + err);
+        Assert.Contains("secrets from .secrets.local: MAIL_KEY", output);
     }
 }

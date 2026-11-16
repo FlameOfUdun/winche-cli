@@ -61,6 +61,30 @@ internal static class FunctionsFolder
     private static readonly string[] Kept = [".ts", ".tsx", ".js", ".mjs", ".json"];
 
     /// <summary>The files to deploy: code and deno.json, not .winche/, node_modules or hidden folders.</summary>
+    /// <summary>The emulator's secrets (NAME=value lines) in the functions folder: never deployed, kept out of git.</summary>
+    public const string SecretsFile = ".secrets.local";
+
+    /// <summary>The NAME=value lines of <paramref name="path"/> (# comments and blank lines skipped), or why one is wrong.</summary>
+    public static Dictionary<string, string> ReadSecrets(string path, List<string> problems)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!File.Exists(path)) return values;
+        var n = 0;
+        foreach (var raw in File.ReadAllLines(path))
+        {
+            n++;
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#')) continue;
+            var eq = line.IndexOf('=');
+            var name = eq > 0 ? line[..eq].Trim() : line;
+            if (eq <= 0 || Winche.Functions.FunctionSecrets.Problem(name) is not null) { problems.Add($"{SecretsFile}:{n}: write NAME=value (NAME in capitals, digits and underscores)."); continue; }
+            var value = line[(eq + 1)..].Trim();
+            if (value.Length >= 2 && (value[0] == '"' && value[^1] == '"' || value[0] == '\'' && value[^1] == '\'')) value = value[1..^1];
+            values[name] = value;
+        }
+        return values;
+    }
+
     public static Dictionary<string, string> Read(string dir)
     {
         if (!Directory.Exists(dir)) throw new CliException($"There's no folder {dir}. Run: winche functions init");
@@ -108,6 +132,7 @@ internal static class FunctionsFolder
         Write("deno.json", Winche.Functions.FunctionsSdk.DenoJson + "\n");
         Write(".winche/functions.ts", Winche.Functions.FunctionsSdk.Source, always: true);   // the SDK: refreshed with the CLI
         Write(".vscode/settings.json", "{\n  \"deno.enable\": true\n}\n");
+        Write(".gitignore", $"{SecretsFile}\n");
         return made;
     }
 

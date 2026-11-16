@@ -50,6 +50,7 @@ winche server settings pull                              # the server's own sett
 winche indexes deploy -m "why"                           # database.indexes to the console (also diff, pull)
 winche functions init                                    # a functions/ folder: index.ts, deno.json, types for VS Code
 winche functions deploy -m "what changed"                # deploy it through the console, as you (or a CI token)
+winche functions secrets                                 # the secrets functions read (secrets:set NAME, secrets:remove NAME)
 winche emulators start                                   # database, storage, auth and functions locally (no console)
 winche emulators exec "npm test"                         # …around a command (CI)
 winche emulators token u1 role=admin                     # a sign-in token the emulators accept
@@ -325,6 +326,23 @@ readable by you only.
   `winche rules deploy` and `winche indexes deploy` then run as that token, named in the version history
   ("gitlab-main (CI token by ann@example.com)"). It stops working if its maker is no longer an admin, and can't do
   anything but deploy. `winche functions deploy` exits with 1 when the code doesn't bundle, printing the problems.
+
+### Function secrets
+
+Functions read API keys and passwords with `ctx.secrets.get("NAME")`, declaring them in their options
+(`{ secrets: ["NAME"] }`). They're kept encrypted on the server and never shown again:
+
+```sh
+winche functions secrets                                  # each one: set or not, when, by whom, which functions use it
+winche functions secrets:set MAIL_API_KEY                 # add or replace: typed unseen, or from WINCHE_SECRET
+winche functions secrets:set FIREBASE_SA --from-file sa.json   # a file's contents (a service account's JSON)
+winche functions secrets:remove MAIL_API_KEY
+```
+
+Setting one applies from the functions' next run; there's nothing to deploy. It needs the Admin role (and two-step
+sign-in where the console requires it); a CI token can't. In the emulators, secrets come from `.secrets.local` in the
+functions folder (`NAME=value` lines, reloaded on save, never deployed; `winche functions init` adds it to
+`.gitignore`).
 
 ## Emulators
 

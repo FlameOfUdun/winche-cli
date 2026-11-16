@@ -142,6 +142,66 @@ internal static partial class CliApp
         /// <summary>A secret's value: <c>WINCHE_SECRET</c>, or typed without being shown.</summary>
         private string SecretValue(string what) => AskSecret(what, "WINCHE_SECRET", confirm: false);
 
+        // ----- function secrets ------------------------------------------------------------------
+
+        /// <summary><c>winche functions secrets</c>: names, whether set, by whom, and which functions declare each. Never values.</summary>
+        public async Task<int> FunctionSecretsAsync(CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var body = await OkAsync(client.SendAsync(HttpMethod.Get, "api/functions/secrets", null, ct), "Can't read the function secrets");
+            var list = body["secrets"]?.AsArray() ?? [];
+            if (body["available"]?.GetValue<bool>() == false) env.Out.WriteLine("Secrets need the server's master key: none can be set here.");
+            if (list.Count == 0) env.Out.WriteLine("No function secrets yet.");
+            foreach (var s in list)
+            {
+                var set = s!["isSet"]?.GetValue<bool>() == true
+                    ? $"set {s["setAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd}{(s["setBy"] is { } by ? $" by {by}" : "")}" : "NOT SET";
+                var used = s["usedBy"]?.AsArray().Select(u => u!.ToString()).ToList() ?? [];
+                env.Out.WriteLine($"  {s["name"],-28} {set,-36} {(used.Count == 0 ? "no function declares it" : "used by " + string.Join(", ", used))}");
+            }
+            env.Out.WriteLine("Add or replace one: winche functions secrets:set <NAME>   Remove one: winche functions secrets:remove <NAME>");
+            return 0;
+        }
+
+        /// <summary>
+        /// <c>winche functions secrets:set NAME</c>: adds or replaces it. The value comes from <c>--from-file</c> (e.g. a
+        /// service account's JSON), else WINCHE_SECRET, else it's typed without being shown.
+        /// </summary>
+        public async Task<int> FunctionSecretSetAsync(string name, CancellationToken ct)
+        {
+            CheckSecretName(name);
+            string value;
+            if (args.Value("from-file") is { } file)
+            {
+                var path = Path.GetFullPath(file, env.WorkingDirectory);
+                if (!File.Exists(path)) throw new CliException($"There's no file {file}.", 2);
+                value = await File.ReadAllTextAsync(path, ct);
+            }
+            else value = env.GetVariable("WINCHE_SECRET") ?? (env.Interactive ? SecretValue(name) : throw new CliException("Set WINCHE_SECRET or use --from-file: there's no terminal to ask in.", 2));
+            if (value.Length == 0) throw new CliException("The value is empty. To remove the secret: winche functions secrets:remove " + name, 2);
+            var client = await ClientAsync(ct);
+            await OkAsync(client.SendAsync(HttpMethod.Put, $"api/functions/secrets/{name}", new { value }, ct), "Not set");
+            env.Out.WriteLine($"Set {name}. Functions get it from their next run.");
+            return 0;
+        }
+
+        /// <summary><c>winche functions secrets:remove NAME</c>.</summary>
+        public async Task<int> FunctionSecretRemoveAsync(string name, CancellationToken ct)
+        {
+            CheckSecretName(name);
+            var client = await ClientAsync(ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Delete, $"api/functions/secrets/{name}", null, ct);
+            if (status == HttpStatusCode.NotFound) throw new CliException($"There's no secret {name}. See: winche functions secrets");
+            if ((int)status is < 200 or >= 300) throw new CliException($"Not removed: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine($"Removed {name}. Functions that read it fail until it's set again.");
+            return 0;
+        }
+
+        private static void CheckSecretName(string name)
+        {
+            if (Winche.Functions.FunctionSecrets.Problem(name) is { } problem) throw new CliException(problem, 2);
+        }
+
         /// <summary>
         /// <c>winche secrets</c> / <c>secrets:set smtp-password | keycloak-sync --provider &lt;name&gt;</c>: the project's
         /// sign-in secrets (your apps' email, a provider's Keycloak sync), set without being shown or saved anywhere else.

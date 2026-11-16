@@ -272,6 +272,24 @@ internal sealed class EmulatorHost : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The functions' secrets for the emulator: <c>.secrets.local</c> in the functions folder (NAME=value lines), loaded at
+    /// start and when it's saved. Secrets no longer in it are removed. The file is never deployed.
+    /// </summary>
+    private async Task LoadSecretsAsync(string folder, bool first)
+    {
+        var secrets = _app.Services.GetRequiredService<Winche.Functions.FunctionSecrets>();
+        var problems = new List<string>();
+        Dictionary<string, string> values;
+        try { values = FunctionsFolder.ReadSecrets(Path.Combine(folder, FunctionsFolder.SecretsFile), problems); }
+        catch (IOException) { return; }   // being written: the next change event reads it
+        foreach (var p in problems) _out.WriteLine($"{DateTime.Now:HH:mm:ss} ✗ {p}");
+        foreach (var (name, value) in values) await secrets.SetAsync(name, value, "emulator");
+        foreach (var old in await secrets.ListAsync(null))
+            if (old.IsSet && !values.ContainsKey(old.Name)) await secrets.RemoveAsync(old.Name);
+        if (values.Count > 0 || !first) _out.WriteLine($"{DateTime.Now:HH:mm:ss} {(first ? "🔑" : "↻")} secrets from {FunctionsFolder.SecretsFile}: {(values.Count == 0 ? "none" : string.Join(", ", values.Keys.Order(StringComparer.Ordinal)))}");
+    }
+
     /// <summary>Deploys the functions folder now and whenever a file in it is saved; a broken save leaves the last good version running.</summary>
     private async Task WatchFunctionsAsync(string folder, CancellationToken ct)
     {
@@ -302,12 +320,14 @@ internal sealed class EmulatorHost : IAsyncDisposable
             }
             finally { gate.Release(); }
         }
+        await LoadSecretsAsync(folder, first: true);
         await DeployAsync(first: true);
         var watcher = new FileSystemWatcher(folder) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size };
         CancellationTokenSource? pending = null;
         var debounce = new object();
         void Changed(object? _, FileSystemEventArgs e)
         {
+            if (Path.GetFileName(e.FullPath) == FunctionsFolder.SecretsFile) { _ = LoadSecretsAsync(folder, first: false); return; }
             if (e.FullPath.Contains($"{Path.DirectorySeparatorChar}.")) return;   // .winche/, editors' temp files
             CancellationTokenSource cts;
             lock (debounce) { pending?.Cancel(); pending = cts = new CancellationTokenSource(); }

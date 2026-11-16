@@ -81,6 +81,11 @@ internal static partial class CliApp
                                Make a functions folder (default functions/): an example, deno.json, types for VS Code
           functions deploy [<dir>]
                                Deploy the functions folder through the console, as you (winche login) or a CI token
+          functions secrets    The secrets functions read (ctx.secrets): set or not, by whom, which functions use them
+          functions secrets:set <NAME>
+                               Add or replace one (the value from WINCHE_SECRET, --from-file <path>, or typed unseen)
+          functions secrets:remove <NAME>
+                               Remove one
           emulators start      Run the database, storage, auth and functions locally (Postgres in Docker; rules and functions reloaded on save)
           emulators exec <cmd> Start the emulators, run <cmd> against them (e.g. your tests), stop, exit with its code
           emulators token <uid> [claim=value …]
@@ -201,6 +206,9 @@ internal static partial class CliApp
                 "indexes pull" => await run.IndexesPullAsync(ct),
                 "functions init" => run.FunctionsInit(a.Positional.ElementAtOrDefault(2)),
                 "functions deploy" => await run.FunctionsDeployAsync(a.Positional.ElementAtOrDefault(2), ct),
+                "functions secrets" => await run.FunctionSecretsAsync(ct),
+                "functions secrets:set" => await run.FunctionSecretSetAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:set <NAME> [--from-file <path>]", 2), ct),
+                "functions secrets:remove" => await run.FunctionSecretRemoveAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:remove <NAME>", 2), ct),
                 "emulators start" => await run.EmulatorsAsync(null, ct),
                 "emulators exec" => await run.EmulatorsAsync(a.Positional.Count > 2 ? string.Join(' ', a.Positional.Skip(2)) : throw new CliException("Usage: winche emulators exec \"<command>\"", 2), ct),
                 "emulators token" => run.Token(a.Positional.Skip(2).ToList()),
@@ -1157,7 +1165,7 @@ internal sealed class Args
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
         "role", "sdk", "android-package", "apple-bundle-id", "web-origin",
-        "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit"];
+        "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project", ["-f"] = "follow" };
 
     public List<string> Positional { get; } = [];
