@@ -17,9 +17,9 @@ internal static partial class CliApp
           init                 Create winche.json, starter database.rules / storage.rules and their test files
           use [<alias>]        Pick the project (console) to use here, or list them
                                (--add <alias> <url>, --remove <alias>, --clear)
-          setup --url <server> Set a new server up: the setup code (in its log), your admin account, the first project
-                               (--code, --email, --first-name, --last-name, --id, --name, --products, --db-*;
-                               the password in WINCHE_ADMIN_PASSWORD, or asked)
+          setup --url <server> Set a new server up: the setup code (in its log) and your admin account (--code, --email,
+                               --first-name, --last-name; the password in WINCHE_ADMIN_PASSWORD, or asked). Then
+                               winche projects:create <id> makes its projects
           login                Sign in to the server in your browser, once for all its projects (--reauth: again;
                                --no-browser: a code to enter in a browser on any device)
           login:add            Sign in another account on the server, beside the one in use
@@ -45,8 +45,8 @@ internal static partial class CliApp
                                to set their password (emailed when the server can send email)
           products             The project's products, and whether they're started
           products:start <p>…  Start products (database, storage, authentication, functions, assets) and follow their setup
-          members:remove <email>  Take someone's access away (the first project: their role, or their invite)
-          invites, invites:revoke <email>  The first project's pending invites
+          members:remove <email>  Take someone's access away (off the project's members)
+          invites, invites:revoke <email>  Pending invites (an app's own console; a server's projects use members:add)
           apps:delete <id>     Remove a registered app
           projects:archive | projects:restore | projects:delete <id>
                                Archive a project (refused until restored), or delete an archived one for good

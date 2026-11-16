@@ -85,6 +85,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
                 case HttpStatusCode.NotFound when notFound is not null && await HasSubsystemAsync(subsystem, ct):
                     throw new CliException(notFound);
                 case HttpStatusCode.NotFound:
+                    await NotAProjectAsync(path, ct);
                     throw new CliException(
                         $"The console has no {subsystem} rules editor. Enable it in the host: Add{Title(subsystem)}Tab(b => b.UseRulesEditor()).");
                 case HttpStatusCode.Conflict:
@@ -122,6 +123,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
             var text = await response.Content.ReadAsStringAsync(ct);
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw Refused();
             if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{console}: this project is archived.");
+            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) await NotAProjectAsync(path, ct);
             return (response.StatusCode, (text.Length > 0 ? TryNode(text) : null) ?? []);
         }
     }
@@ -138,10 +140,29 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         {
             var text = await response.Content.ReadAsStringAsync(ct);
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw Refused();
+            if (response.StatusCode == HttpStatusCode.NotFound) await NotAProjectAsync(path, ct);
             if (!response.IsSuccessStatusCode) throw new CliException(ErrorText((text.Length > 0 ? TryNode(text) : null) ?? [], response.StatusCode));
             try { return System.Text.Json.Nodes.JsonNode.Parse(text) as System.Text.Json.Nodes.JsonArray ?? []; }
             catch (JsonException) { return []; }
         }
+    }
+
+    /// <summary>
+    /// A project's page asked of the server's own console (the root, which has no project): says to pick a project.
+    /// Asked of the console only on a 404, and only where the address isn't a project's (<c>/p/&lt;id&gt;/…</c>).
+    /// </summary>
+    private async Task NotAProjectAsync(string path, CancellationToken ct)
+    {
+        if (console.AbsolutePath.Contains("/p/", StringComparison.Ordinal)) return;
+        if (path.StartsWith("api/projects", StringComparison.Ordinal) || path.StartsWith("api/server", StringComparison.Ordinal)
+            || path.StartsWith("api/auth", StringComparison.Ordinal) || path.StartsWith("api/cli-login", StringComparison.Ordinal)) return;
+        try
+        {
+            using var state = await http.GetAsync(new Uri(console, "api/auth/state"), ct);
+            if (!state.IsSuccessStatusCode || TryNode(await state.Content.ReadAsStringAsync(ct))?["server"]?.GetValue<bool>() != true) return;
+        }
+        catch (HttpRequestException) { return; }
+        throw new CliException($"{console} is the server's own console, which has no project: pick one with --project <id> (winche projects lists them), or winche use --add <alias> {new Uri(console, "../p/<id>/_console").ToString().Replace("%3C", "<").Replace("%3E", ">")}.");
     }
 
     /// <summary>A 401: a CI token that may not do this (or was revoked, or expired), or a sign-in that has ended.</summary>
@@ -180,6 +201,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
             if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{console}: this project is archived.");
             if (response.StatusCode == HttpStatusCode.Forbidden)
                 throw new CliException("Your account can't see this here: it has no role in this project (or not enough). See your projects: winche projects");
+            if (response.StatusCode == HttpStatusCode.NotFound) await NotAProjectAsync(path, ct);
             if (!response.IsSuccessStatusCode) throw new CliException($"The console answered {(int)response.StatusCode} {response.ReasonPhrase}.");
             return System.Text.Json.Nodes.JsonNode.Parse(text) as System.Text.Json.Nodes.JsonObject ?? throw new CliException("The console sent an unreadable response.");
         }
@@ -244,6 +266,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
                 case HttpStatusCode.NotFound when missingOk && json["error"] is System.Text.Json.Nodes.JsonObject:
                     break;   // the thing asked for isn't there (the console said so): the caller words it
                 case HttpStatusCode.NotFound:
+                    await NotAProjectAsync(path, ct);
                     throw new CliException($"The console doesn't manage {what} (the app has no Add{Title(what)}…).");
             }
             return (response.IsSuccessStatusCode, json);

@@ -18,7 +18,7 @@ It needs the .NET 10 runtime. The current version is 2.0.0.
 ## Commands
 
 ```sh
-winche setup --url https://api.example.com               # a new server: setup code, your admin account, first project
+winche setup --url https://api.example.com               # a new server: setup code, your admin account
 winche init --console https://api.example.com/_console   # winche.json, rules files and their test files
 winche use --add prod https://api.example.com/_console   # name a console (and use it here)
 winche use dev                                           # switch projects; `winche use` lists them
@@ -77,19 +77,22 @@ page.
 ```sh
 export WINCHE_ADMIN_PASSWORD=...                       # or it's asked for (not shown as you type)
 winche setup --url https://api.example.com --code "$(docker compose logs winche | grep -o 'Setup code: .*' | cut -d' ' -f3)" \
-  --email ann@example.com --id clinic --name Clinic   # the admin account (signed in here) and the first project
+  --email ann@example.com                              # the admin account (signed in here)
 winche 2fa enable                                      # an authenticator app: changing settings needs it by default
+winche projects:create clinic --name Clinic            # a project: its own database, at /p/clinic
+winche use --add clinic https://api.example.com/p/clinic/_console
 winche products:start database storage authentication
 winche apps:create "Clinic" --id clinic-app --android-package com.example.clinic --apple-bundle-id com.example.clinic
 winche members:add bob@example.com --role Member
-winche init --console https://api.example.com/_console
+winche init --console https://api.example.com/p/clinic/_console
 winche settings pull                                   # settings/database.json, storage.json, auth.json, webhooks.json, …
 ```
 
-- **`winche setup`** does the console's first-run setup: the **setup code** (only in the server's log), your admin
-  account, and the first project with its database. That's on the server's PostgreSQL by default, or elsewhere with
-  `--db-host`, `--db-port`, `--db-name`, `--db-user`, `--db-ssl` and `WINCHE_DB_PASSWORD`. Anything not passed is asked
-  for. Run again after a failure, it carries on where it stopped.
+- **`winche setup`** does the server's first-run setup: the **setup code** (only in the server's log) and your admin
+  account. The server then runs with no project: `winche projects:create <id>` makes each one, its database on the
+  server's PostgreSQL by default, or elsewhere with `--db-host`, `--db-port`, `--db-name`, `--db-user`, `--db-ssl` and
+  `WINCHE_DB_PASSWORD`. Anything not passed is asked for. A project command pointed at the server's own console (the
+  root) says to pick a project: `--project <id>`, or `winche use`.
 - **Settings as files:** `settings/<area>.json` beside `winche.json`, one per area: `database` (limits, history,
   request logs), `database.live`, `storage`, `auth` (your apps' sign-in methods and emails), `auth.providers`
   (trusted token issuers) and `webhooks`. `winche settings deploy -m "why"` saves each changed file as a new version
@@ -109,12 +112,9 @@ winche settings pull                                   # settings/database.json,
   `--web-origin a,b`; Flutter is the only SDK so far), and prints the `winche configure --app <id>` to run in its
   folder. `winche apps` lists them.
 - **Members:** `winche members:add <email> --role Admin|Member|Viewer` (Member by default). In a project made with
-  `projects:create`, they become its member; someone new gets an account and a link to set its password. The first
-  project goes by the accounts' own roles: someone new is invited with that role, an existing account is given it
-  (Admin there is a server admin). Links are emailed when the server can send email, else printed to pass on.
+  `projects:create`, they become its member; someone new gets an account and a link to set its password. Links are emailed when the server can send email, else printed to pass on.
   `winche members` lists who has access.
-- **Taking things back:** `winche members:remove <email>` (in the first project: their role, or their pending
-  invite; the account stays), `winche invites` / `invites:revoke <email>`, `winche apps:delete <id>`, and for server
+- **Taking things back:** `winche members:remove <email>` (off the project's members; the account stays), `winche invites` / `invites:revoke <email>`, `winche apps:delete <id>`, and for server
   admins `winche projects:archive | projects:restore <id>` and `projects:delete <id>` (archived first; asks you to type
   the id, or `--yes`). Anything that can't be undone asks first; without a terminal it needs `--yes`.
 - **Secrets** are never on the command line: they're typed unseen, or read from `WINCHE_SECRET`. `winche secrets`

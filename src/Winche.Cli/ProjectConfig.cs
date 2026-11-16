@@ -118,7 +118,11 @@ internal sealed record ConsoleTarget(Uri Url, string? Alias)
     /// </summary>
     public static ConsoleTarget? Resolve(ProjectConfig? config, string? consoleArg, string? projectArg, CliEnvironment env)
     {
-        if (consoleArg is not null) return new(Parse(consoleArg), null);
+        // --console with --project <id>: that project on the same server (an id, not an alias of winche.json's).
+        if (consoleArg is not null)
+            return projectArg is not null && WincheIds.IsValid(projectArg) && config?.Projects?.ContainsKey(projectArg) != true
+                ? new(ForProject(Parse(consoleArg), projectArg), projectArg)
+                : new(Parse(consoleArg), null);
         var projects = config?.Projects ?? [];
         if (projectArg is not null)
         {

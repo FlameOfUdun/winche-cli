@@ -82,8 +82,7 @@ internal static partial class CliApp
 
         /// <summary>
         /// <c>winche setup --url &lt;server&gt;</c>: a new server's first-run setup, like the console's: the setup code (from the
-        /// server's log), the admin account (signed in here), and the first project with its database. Run again after
-        /// a failure, it carries on where it stopped.
+        /// server's log) and the admin account (signed in here). Projects come next: <c>winche projects:create</c>.
         /// </summary>
         public async Task<int> SetupAsync(CancellationToken ct)
         {
@@ -109,24 +108,11 @@ internal static partial class CliApp
                 env.Out.WriteLine($"Made the admin account {email}, and signed in here.");
             }
 
-            var client = await ClientAsync(console, ct);
-            var project = await client.GetJsonAsync("api/project", ct);
-            if (project["created"]?.GetValue<bool>() != true)
-            {
-                var id = Ask("Project id (lower-case letters, digits and dashes)", args.Value("id"), option: "--id");
-                var name = Ask("Project name", args.Value("name"), id);
-                var products = Products(args.Value("products"));
-                var (status, body) = await client.SendAsync(HttpMethod.Post, "api/project", new { name, id, products, database = DatabaseTarget() }, ct);
-                if (status != HttpStatusCode.OK) throw new CliException($"Making the project failed: {ConsoleClient.ErrorText(body, status)}");
-                env.Out.WriteLine($"Made the project {name} ({id}){(args.Value("db-host") is { } h ? $", its database on {h}" : ", its database on the server's PostgreSQL")}.");
-            }
-            else env.Out.WriteLine($"The first project is {project["name"]} ({project["id"]}).");
-
             env.Out.WriteLine();
             env.Out.WriteLine("Next:");
-            env.Out.WriteLine($"  winche init --console {CredentialStore.Key(console)}   # this folder's project");
             env.Out.WriteLine("  winche 2fa enable                    # changing settings needs two-step sign-in (unless the server turns that off)");
-            env.Out.WriteLine("  winche products:start database       # and storage, authentication, functions");
+            env.Out.WriteLine("  winche projects:create <id> --name …  # a project: its own database, users and files, at /p/<id>");
+            env.Out.WriteLine($"  winche init --console {ConsoleTarget.ForProject(console, "ID").ToString().TrimEnd('/').Replace("/p/ID/", "/p/<id>/")}   # this folder's project");
             return 0;
         }
 
@@ -278,7 +264,7 @@ internal static partial class CliApp
 
         private static readonly string[] Roles = ["Admin", "Member", "Viewer"];
 
-        /// <summary><c>winche members</c>: who can use the project. The first project goes by the accounts' own roles.</summary>
+        /// <summary><c>winche members</c>: who can use the project (an app's own console without a member list: its accounts' roles).</summary>
         public async Task<int> MembersListAsync(CancellationToken ct)
         {
             var client = await ClientAsync(ct);
@@ -291,7 +277,7 @@ internal static partial class CliApp
                 return 0;
             }
             if (status is not (HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)) throw new CliException(ConsoleClient.ErrorText(body, status));
-            // The first project: everyone with an account role (and who's invited).
+            // An app's own console (no member list): everyone with an account role (and who's invited).
             foreach (var u in await client.GetListAsync("api/users", ct))
                 if (u?["role"]?.ToString() is { Length: > 0 } accountRole)
                     env.Out.WriteLine($"  {u["email"],-32} {accountRole}{(accountRole == "Admin" ? " (server admin)" : "")}{(u["active"]?.GetValue<bool>() == false ? " (turned off)" : "")}");
@@ -302,8 +288,8 @@ internal static partial class CliApp
 
         /// <summary>
         /// <c>winche members:add &lt;email&gt; [--role Member]</c>. In a created project they become its member (an account is
-        /// made for someone new, with a link to set its password). The first project goes by the accounts' own roles:
-        /// someone new is invited with that role, an existing account gets it (Admin there means a server admin).
+        /// made for someone new, with a link to set its password). An app's own console (no member list) goes by the
+        /// accounts' own roles: someone new is invited with that role, an existing account gets it.
         /// </summary>
         public async Task<int> MembersAddAsync(string? email, CancellationToken ct)
         {
@@ -318,22 +304,22 @@ internal static partial class CliApp
                 Link(body, body["newAccount"]?.GetValue<bool>() == true ? "It's a new account: they set their password with this link" : null);
                 return 0;
             }
-            // No member list here (404, or 405 where the console's pages take the path): the first project.
+            // No member list here (404, or 405 where the console's pages take the path): an app's own console.
             if (status is not (HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)) throw new CliException($"Not added: {ConsoleClient.ErrorText(body, status)}");
 
-            // The first project: the account's own role.
+            // An app's own console: the account's own role.
             var list = await client.GetListAsync("api/users", ct);
             var existing = list.FirstOrDefault(u => string.Equals(u?["email"]?.ToString(), email, StringComparison.OrdinalIgnoreCase));
             if (existing is not null)
             {
                 (status, body) = await client.SendAsync(HttpMethod.Put, $"api/users/{existing["id"]}", new { role }, ct);
                 if (status != HttpStatusCode.OK) throw new CliException($"Not changed: {ConsoleClient.ErrorText(body, status)}");
-                env.Out.WriteLine($"{email} is now {role} here{(role == "Admin" ? " (in the first project, that's a server admin)" : "")}.");
+                env.Out.WriteLine($"{email} is now {role} here.");
                 return 0;
             }
             (status, body) = await client.SendAsync(HttpMethod.Post, "api/invites", new { email, role, expiresInHours = 168, requireName = false, requireTwoFactor = false }, ct);
             if (status != HttpStatusCode.OK) throw new CliException($"Not invited: {ConsoleClient.ErrorText(body, status)}");
-            env.Out.WriteLine($"Invited {email} as {role}{(role == "Admin" ? " (in the first project, that's a server admin)" : "")}; the invite lasts 7 days.");
+            env.Out.WriteLine($"Invited {email} as {role}; the invite lasts 7 days.");
             Link(body, "They accept it with this link");
             return 0;
         }

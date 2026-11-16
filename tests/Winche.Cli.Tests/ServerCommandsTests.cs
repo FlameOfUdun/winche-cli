@@ -82,13 +82,26 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     {
         _vars["WINCHE_ADMIN_PASSWORD"] = Password;
         var setup = await Run(null, "setup", "--url", "http://localhost", "--code", "anything", "--email", "ann@example.com",
-            "--first-name", "Ann", "--last-name", "Admin", "--id", "clinic", "--name", "Clinic");
+            "--first-name", "Ann", "--last-name", "Admin");
         Assert.True(setup.Exit == 0, setup.Out + setup.Err);
+        await MakeProjectAsync("clinic", "Clinic");
         File.WriteAllText(Path.Combine(_dir, "winche.json"), $$"""{ "console": "{{Url}}", "rules": {} }""");
     }
 
+    /// <summary>
+    /// The test host is one app's console (with project setup): its project made as a server's Projects page makes one
+    /// (setup itself makes only the admin).
+    /// </summary>
+    private async Task MakeProjectAsync(string id, string name)
+    {
+        var console = _app.CreateClient();
+        Assert.True((await console.PostAsJsonAsync("/_console/api/auth/login", new { email = "ann@example.com", password = Password })).IsSuccessStatusCode);
+        var made = await console.PostAsJsonAsync("/_console/api/project", new { name, id, products = Array.Empty<string>() });
+        Assert.True(made.IsSuccessStatusCode, await made.Content.ReadAsStringAsync());
+    }
+
     [Fact]
-    public async Task Setup_makes_the_admin_signs_in_here_and_makes_the_first_project()
+    public async Task Setup_makes_the_admin_and_signs_in_here()
     {
         await SetupAsync();
         var login = await Run(null, "login");
@@ -103,10 +116,10 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         Assert.Contains("database         started", (await Run(null, "products")).Out);
         Assert.Equal(2, (await Run(null, "products:start", "nope")).Exit);
 
-        // Run again, it says it's set up (and carries on with nothing left to do).
+        // Run again, it carries on with nothing left to do: projects are made with projects:create.
         var again = await Run(null, "setup", "--url", "http://localhost");
         Assert.True(again.Exit == 0, again.Err);
-        Assert.Contains("The first project is Clinic (clinic)", again.Out);
+        Assert.Contains("winche projects:create", again.Out);
 
         // Set up already, a new machine is told to sign in instead.
         Directory.Delete(_configDir, recursive: true);
@@ -119,9 +132,9 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     public async Task Setup_asks_for_what_it_isnt_given()
     {
         _vars["TEST_SECRET"] = Password;
-        var setup = await Run("the-code\nann@example.com\nAnn\n\nclinic\n\n", "setup", "--url", "http://localhost");
+        var setup = await Run("the-code\nann@example.com\nAnn\n\n", "setup", "--url", "http://localhost");
         Assert.True(setup.Exit == 0, setup.Out + setup.Err);
-        Assert.Contains("Made the project clinic (clinic)", setup.Out);   // the name defaults to the id
+        Assert.Contains("Made the admin account ann@example.com", setup.Out);
         // Nobody to ask: it says which option is missing.
         Directory.Delete(_configDir, recursive: true);
         var blind = await Run(null, "setup", "--url", "http://localhost");

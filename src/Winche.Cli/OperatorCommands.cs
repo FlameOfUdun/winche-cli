@@ -37,7 +37,7 @@ internal static partial class CliApp
         // ----- taking things back --------------------------------------------------------------------
 
         /// <summary>
-        /// <c>winche members:remove &lt;email&gt;</c>: off a created project's members; in the first project, the account's
+        /// <c>winche members:remove &lt;email&gt;</c>: off the project's members; in an app's own console (no member list), the account's
         /// role is taken away (or its pending invite revoked). The account itself stays: other projects may have it.
         /// </summary>
         public async Task<int> MembersRemoveAsync(string? email, CancellationToken ct)
@@ -57,7 +57,7 @@ internal static partial class CliApp
             }
             if (!NoMemberList(status)) throw new CliException(ConsoleClient.ErrorText(body, status));
 
-            // The first project: an invite, or the account's own role.
+            // An app's own console: an invite, or the account's own role.
             if ((await client.GetListAsync("api/invites", ct)).FirstOrDefault(i => Same(i?["email"], email) && i?["status"]?.ToString() == "pending") is { } invite)
             {
                 await OkAsync(client.SendAsync(HttpMethod.Delete, $"api/invites/{invite["id"]}", null, ct), "Not revoked");
@@ -74,7 +74,7 @@ internal static partial class CliApp
 
         private static bool Same(JsonNode? a, string b) => string.Equals(a?.ToString(), b, StringComparison.OrdinalIgnoreCase);
 
-        /// <summary><c>winche invites</c>: the first project's pending invites.</summary>
+        /// <summary><c>winche invites</c>: pending invites to an app's own console (a server's projects invite through members:add).</summary>
         public async Task<int> InvitesAsync(CancellationToken ct)
         {
             var invites = (await (await ClientAsync(ct)).GetListAsync("api/invites", ct)).Where(i => i?["status"]?.ToString() == "pending").ToList();
@@ -314,7 +314,7 @@ internal static partial class CliApp
             if (action is null)
             {
                 foreach (var u in users)
-                    env.Out.WriteLine($"  {u!["email"],-32} {u["role"]?.ToString() ?? "(no role in the first project)",-30} {(u["active"]?.GetValue<bool>() == false ? "turned off" : "")}{(u["twoFactorEnabled"]?.GetValue<bool>() == true ? " two-step" : "")}");
+                    env.Out.WriteLine($"  {u!["email"],-32} {(u["role"]?.ToString() == "Admin" ? "server admin" : ""),-30} {(u["active"]?.GetValue<bool>() == false ? "turned off" : "")}{(u["twoFactorEnabled"]?.GetValue<bool>() == true ? " two-step" : "")}");
                 return 0;
             }
             email = Ask("Their email", email, option: $"the email: winche server users:{action} <email>");
