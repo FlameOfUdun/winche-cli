@@ -86,7 +86,7 @@ internal static class RuleTests
         var data = given;
         var segments = path.Split('/');
         map["id"] = new StringValue(segments[^1]);
-        map["path"] = new ReferenceValue(path);
+        map["path"] = new DocumentReferenceValue(path);
         map["collection"] = new StringValue(segments.Length > 1 ? segments[^2] : "");
         map.TryAdd("createdAt", new TimestampValue(time));
         map.TryAdd("updatedAt", new TimestampValue(time));

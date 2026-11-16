@@ -330,7 +330,7 @@ internal sealed class RuleTestParser
             case "true": return RuleValues.True;
             case "false": return RuleValues.False;
             case "null": return RuleValues.Null;
-            case "timestamp" or "path" or "bytes" or "fileRef" or "userRef":
+            case "timestamp" or "path" or "bytes" or "fileReference" or "userReference":
                 Expect('(');
                 Skip();
                 var argAt = _pos;
@@ -341,9 +341,9 @@ internal sealed class RuleTestParser
                     return word switch
                     {
                         "timestamp" => new TimestampValue(DateTimeOffset.Parse(arg, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)),
-                        "path" => new ReferenceValue(arg.Trim('/')),
-                        "fileRef" => new FileRefValue(arg.TrimStart('/')),
-                        "userRef" => new UserRefValue(arg),
+                        "path" => new DocumentReferenceValue(arg.Trim('/')),
+                        "fileReference" => new FileReferenceValue(arg.TrimStart('/')),
+                        "userReference" => new UserReferenceValue(arg),
                         _ => new BytesValue(Convert.FromBase64String(arg)),
                     };
                 }

@@ -148,6 +148,28 @@ public sealed class RuleTestsTests : IDisposable
     }
 
     [Fact]
+    public async Task Reference_values_have_their_full_names_in_tests_and_rules()
+    {
+        var (exit, output, err) = await Test("""
+            match notes/{id} {
+              allow get: if resource.owner is userReference && resource.owner == request.auth.uid
+                && resource.scan is fileReference && resource.patient is documentReference;
+            }
+            """, """
+            test "the owner reads it" {
+              resource { owner: userReference('u1'), scan: fileReference('scans/a.png'), patient: path('patients/p1') }
+              auth { uid: 'u1' }
+              allow get notes/n1
+              auth { uid: 'u2' }
+              deny get notes/n1
+            }
+            """);
+
+        Assert.True(exit == 0, output + err);
+        Assert.Contains("2 checks passed", output);
+    }
+
+    [Fact]
     public async Task Failures_show_the_line_and_exit_1()
     {
         var (exit, output, _) = await Test(Rules, """
