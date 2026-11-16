@@ -10,6 +10,6 @@
          repository) with both rules editors, over Winche.Database and Winche.Storage. -->
     <ProjectReference Include="..\..\..\winche-server\src\Winche.Console\Winche.Console.csproj" />
     <PackageReference Include="Winche.Database" Version="12.1.0" />
-    <PackageReference Include="Winche.Storage" Version="10.0.0" />
+    <PackageReference Include="Winche.Storage" Version="11.0.0" />
   </ItemGroup>
 </Project>
