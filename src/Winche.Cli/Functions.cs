@@ -84,40 +84,40 @@ internal static class FunctionsFolder
         return values;
     }
 
-    /// <summary>The folder (in the functions folder) deployed as ctx.assets: any files, sent by content hash.</summary>
-    public const string AssetsFolder = "assets";
+    /// <summary>The folder (in the functions folder) deployed as ctx.resources: any files, sent by content hash.</summary>
+    public const string ResourcesFolder = "resources";
 
-    /// <summary>The assets/ folder's files (path inside it → file on disk), hidden ones skipped.</summary>
-    public static SortedDictionary<string, string> AssetFiles(string dir)
+    /// <summary>The resources/ folder's files (path inside it → file on disk), hidden ones skipped.</summary>
+    public static SortedDictionary<string, string> ResourceFiles(string dir)
     {
-        var assets = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var root = Path.Combine(dir, AssetsFolder);
-        if (!Directory.Exists(root)) return assets;
+        var resources = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var root = Path.Combine(dir, ResourcesFolder);
+        if (!Directory.Exists(root)) return resources;
         foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
             var rel = Path.GetRelativePath(root, path).Replace('\\', '/');
             if (rel.Split('/').Any(p => p.StartsWith('.'))) continue;
-            assets[rel] = path;
+            resources[rel] = path;
         }
-        return assets;
+        return resources;
     }
 
-    /// <summary>Each asset's hash and size, with its content (path inside assets/ → entry).</summary>
-    public static Dictionary<string, (Winche.Functions.AssetEntry Entry, string File)> HashAssets(string dir)
+    /// <summary>Each resource's hash and size, with its content (path inside resources/ → entry).</summary>
+    public static Dictionary<string, (Winche.Functions.ResourceEntry Entry, string File)> HashResources(string dir)
     {
-        var map = new Dictionary<string, (Winche.Functions.AssetEntry, string)>(StringComparer.Ordinal);
-        foreach (var (rel, file) in AssetFiles(dir))
+        var map = new Dictionary<string, (Winche.Functions.ResourceEntry, string)>(StringComparer.Ordinal);
+        foreach (var (rel, file) in ResourceFiles(dir))
         {
             using var stream = File.OpenRead(file);
             var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(stream));
-            map[rel] = (new Winche.Functions.AssetEntry(hash, stream.Length), file);
+            map[rel] = (new Winche.Functions.ResourceEntry(hash, stream.Length), file);
         }
         return map;
     }
 
     /// <summary>
     /// The files to deploy: code and deno.json, and console pages' web files (HTML, CSS, images, fonts; binary ones as
-    /// base64), not assets/ (sent apart, by hash), .winche/, node_modules, hidden files or anything else.
+    /// base64), not resources/ (sent apart, by hash), .winche/, node_modules, hidden files or anything else.
     /// </summary>
     public static Dictionary<string, string> Read(string dir)
     {
@@ -126,7 +126,7 @@ internal static class FunctionsFolder
         foreach (var path in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
         {
             var rel = Path.GetRelativePath(dir, path).Replace('\\', '/');
-            if (rel.Split('/').Any(p => p.StartsWith('.') || p == "node_modules") || rel.StartsWith(AssetsFolder + "/", StringComparison.Ordinal)) continue;
+            if (rel.Split('/').Any(p => p.StartsWith('.') || p == "node_modules") || rel.StartsWith(ResourcesFolder + "/", StringComparison.Ordinal)) continue;
             var ext = Path.GetExtension(rel);
             if (Winche.Functions.ConsolePages.Binary.Contains(ext))
                 files[rel] = Winche.Functions.ConsolePages.Base64Prefix + Convert.ToBase64String(File.ReadAllBytes(path));
@@ -176,23 +176,23 @@ internal static class FunctionsFolder
     public static async Task<int> DeployAsync(ConsoleClient console, string dir, string? note, CliEnvironment env, CancellationToken ct)
     {
         var files = Read(dir);
-        var assets = HashAssets(dir);
-        if (assets.Count > 0)
+        var resources = HashResources(dir);
+        if (resources.Count > 0)
         {
             // Only contents the server doesn't have yet are sent; the rest are named by hash.
-            var (asked, answer) = await console.PostAsync("api/functions/assets/missing", new { hashes = assets.Values.Select(a => a.Entry.Hash).Distinct() }, "functions", ct);
-            if (!asked) { env.Error.WriteLine($"Not deployed: {answer["error"]?["message"]?.GetValue<string>() ?? "the console refused the assets."}"); return 1; }
+            var (asked, answer) = await console.PostAsync("api/functions/resources/missing", new { hashes = resources.Values.Select(a => a.Entry.Hash).Distinct() }, "functions", ct);
+            if (!asked) { env.Error.WriteLine($"Not deployed: {answer["error"]?["message"]?.GetValue<string>() ?? "the console refused the resources."}"); return 1; }
             var missing = (answer["missing"] as JsonArray ?? []).Select(h => h!.GetValue<string>()).ToHashSet();
-            var sending = assets.Where(a => missing.Remove(a.Value.Entry.Hash)).ToList();
-            if (sending.Count > 0) env.Out.WriteLine($"Sending {sending.Count} new asset{(sending.Count == 1 ? "" : "s")} ({sending.Sum(a => a.Value.Entry.Size) / 1024.0 / 1024:0.#} MB)…");
+            var sending = resources.Where(a => missing.Remove(a.Value.Entry.Hash)).ToList();
+            if (sending.Count > 0) env.Out.WriteLine($"Sending {sending.Count} new resource{(sending.Count == 1 ? "" : "s")} ({sending.Sum(a => a.Value.Entry.Size) / 1024.0 / 1024:0.#} MB)…");
             foreach (var (rel, (entry, file)) in sending)
             {
-                var (sent, refusal) = await console.PutBytesAsync($"api/functions/assets/{entry.Hash}", await File.ReadAllBytesAsync(file, ct), "functions", ct);
-                if (!sent) { env.Error.WriteLine($"Not deployed: assets/{rel}: {refusal["error"]?["message"]?.GetValue<string>() ?? "the console refused it."}"); return 1; }
+                var (sent, refusal) = await console.PutBytesAsync($"api/functions/resources/{entry.Hash}", await File.ReadAllBytesAsync(file, ct), "functions", ct);
+                if (!sent) { env.Error.WriteLine($"Not deployed: resources/{rel}: {refusal["error"]?["message"]?.GetValue<string>() ?? "the console refused it."}"); return 1; }
             }
         }
         var (ok, body) = await console.PostAsync("api/functions/deploy",
-            new { files, note = note ?? $"Deployed from {Path.GetFileName(Path.GetFullPath(dir))}", assets = assets.ToDictionary(a => a.Key, a => a.Value.Entry) }, "functions", ct);
+            new { files, note = note ?? $"Deployed from {Path.GetFileName(Path.GetFullPath(dir))}", resources = resources.ToDictionary(a => a.Key, a => a.Value.Entry) }, "functions", ct);
         if (!ok)
         {
             env.Error.WriteLine($"Not deployed: {body["error"]?["message"]?.GetValue<string>() ?? "the console refused it."}");
@@ -201,7 +201,7 @@ internal static class FunctionsFolder
         }
         var fns = body["functions"] as JsonArray ?? [];
         env.Out.WriteLine($"Deployed version {body["version"]}: {(fns.Count == 0 ? "no functions" : string.Join(", ", fns.Select(f => f?["name"]?.GetValue<string>())))}"
-            + (assets.Count == 0 ? "." : $", with {assets.Count} asset{(assets.Count == 1 ? "" : "s")}."));
+            + (resources.Count == 0 ? "." : $", with {resources.Count} resource{(resources.Count == 1 ? "" : "s")}."));
         return 0;
     }
 }
