@@ -158,7 +158,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         builder.Services.AddWincheCaller(async http => await WincheClaims.FromAsync(http) ?? TestTokens.Claims(http));
 
         builder.Services.AddWincheHooks(o => o.ConnectionString = connection);   // webhooks and ready-made actions
-        // Functions (JS/TS on Deno), with ctx.db / ctx.files / ctx.users; callables at /functions/v1/call/{name}.
+        // Functions (JS/TS on Deno), with ctx.documents / ctx.files / ctx.auth; callables at /functions/v1/call/{name}.
         Winche.Functions.ServiceCollectionExtensions.AddWincheFunctions(builder.Services, o =>
         {
             o.ConnectionString = connection;

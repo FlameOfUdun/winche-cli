@@ -142,12 +142,12 @@ internal static class FunctionsFolder
         export const hello = callable(async (data: { name?: string }, ctx) => {
           if (!data?.name) throw new HttpsError("invalid-argument", "Send a name.");
           ctx.log("Saying hello to", data.name);
-          return { greeting: `Hello ${data.name}`, by: ctx.auth?.uid ?? null };
+          return { greeting: `Hello ${data.name}`, by: ctx.caller?.uid ?? null };
         });
 
         // When a document is created: {name} parts of the path are in e.params
         // export const onVisit = documents.onCreated("patients/{patientId}/visits/{visitId}", async (e, ctx) => {
-        //   await ctx.db.update(`patients/${e.params.patientId}`, { lastVisit: new Date() });
+        //   await ctx.documents.doc(`patients/${e.params.patientId}`).update({ lastVisit: new Date() });
         // });
 
         """;
