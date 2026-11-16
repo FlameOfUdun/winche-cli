@@ -348,8 +348,22 @@ Functions read API keys and passwords with `ctx.secrets.get("NAME")`, declaring 
 winche functions secrets                                  # each one: set or not, when, by whom, which functions use it
 winche functions secrets:set MAIL_API_KEY                 # add or replace: typed unseen, or from WINCHE_SECRET
 winche functions secrets:set SERVICE_ACCOUNT --from-file sa.json   # a file's contents (a service account's JSON)
+winche functions secrets:set SES_SECRET --ref aws-sm:app/ses#secretAccessKey   # read from AWS when functions run
 winche functions secrets:remove MAIL_API_KEY
 ```
+
+A secret can instead be a **reference** to where it's really kept, read when it's needed (and again a few minutes
+later, so rotations are picked up): `aws-sm:<ARN or name>[#field]` (AWS Secrets Manager, optionally one field of a JSON
+secret) or `aws-ssm:<parameter>` (Parameter Store). `--ref` works for `secrets:set` and `server secrets:set` too.
+
+```sh
+winche secrets:sources                                    # where secrets can be read from, and the project's own keys
+winche secrets:key aws --access-key-id AKIA… --region eu-west-2   # the project's AWS key (secret key: WINCHE_SECRET or typed)
+winche secrets:test aws-ssm:/app/mail-key                 # read it now: whether it works (never the value)
+```
+
+On Winche Server, references without the project's own AWS key are read with the server's credentials, so only server
+admins may set those.
 
 Setting one applies from the functions' next run; there's nothing to deploy. It needs the Admin role (and two-step
 sign-in where the console requires it); a CI token can't. In the emulators, secrets come from `.secrets.local` in the
