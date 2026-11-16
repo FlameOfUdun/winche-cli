@@ -330,6 +330,22 @@ internal sealed class RuleTestParser
             case "true": return RuleValues.True;
             case "false": return RuleValues.False;
             case "null": return RuleValues.Null;
+            case "geoPoint":
+            {
+                // geoPoint(51.5, -0.12): a latitude (-90 to 90) and a longitude (-180 to 180).
+                Expect('(');
+                Skip();
+                var latAt = _pos;
+                var lat = Coordinate(ParseNumber(), latAt, 90, "latitude");
+                Skip();
+                Expect(',');
+                Skip();
+                var lngAt = _pos;
+                var lng = Coordinate(ParseNumber(), lngAt, 180, "longitude");
+                Skip();
+                Expect(')');
+                return new GeoPointValue(lat, lng);
+            }
             case "timestamp" or "path" or "bytes" or "fileReference" or "userReference":
                 Expect('(');
                 Skip();
@@ -355,6 +371,13 @@ internal sealed class RuleTestParser
         }
         Fail(word.Length == 0 ? "expected a value" : $"expected a value, found '{word}' (strings are quoted: '{word}')", at);
         throw new InvalidOperationException();
+    }
+
+    private double Coordinate(Value number, int at, double limit, string what)
+    {
+        var d = number switch { IntegerValue i => i.Value, DoubleValue v => v.Value, _ => double.NaN };
+        if (double.IsNaN(d) || d < -limit || d > limit) Fail($"a {what} is between -{limit} and {limit}", at);
+        return d;
     }
 
     private Value ParseNumber()

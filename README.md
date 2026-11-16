@@ -266,8 +266,9 @@ test "only until the cutoff" {
   incoming document with `with { ... }`; database `list` takes `where field op value` (`== != < <= > >=`,
   joined with `&&`) and `group` for a collection group query.
 - **Setup:** `auth`, `resource`, `time` and `documents` apply to the checks after them in the same test.
-- **Values:** `'strings'`, numbers, `true false null`, `[lists]`, `{maps}` (keys bare or quoted),
-  `timestamp('…')`, `path('…')`, `bytes('base64')`. `//` comments.
+- **Values:** `'strings'`, numbers, `true false null`, `[arrays]`, `{maps}` (keys bare or quoted),
+  `timestamp('…')`, `path('…')` (a document reference), `fileReference('scans/a.png')`, `userReference('u1')`,
+  `geoPoint(51.5, -0.12)` (latitude, longitude), `bytes('base64')`. `//` comments.
 - **Like the server:** `auth` becomes `request.auth` (`uid` plus every claim under `token`); a database
   document gets its fields plus `data`, `id`, `path` and `collection`; a database `list` is proved against its
   filters (rules are not filters); values compare exactly as the database compares them.

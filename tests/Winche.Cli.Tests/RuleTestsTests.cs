@@ -170,6 +170,33 @@ public sealed class RuleTestsTests : IDisposable
     }
 
     [Fact]
+    public async Task Geo_points_are_written_as_geoPoint_latitude_longitude()
+    {
+        var (exit, output, err) = await Test("""
+            match visits/{id} {
+              allow create: if request.resource.data.place is geoPoint && request.resource.data.place.latitude > 50;
+            }
+            """, """
+            test "places in the north only" {
+              auth { uid: 'n1' }
+              allow create visits/v1 with { place: geoPoint(51.5, -0.12) }
+              deny create visits/v2 with { place: geoPoint(40, 2) }
+              deny create visits/v3 with { place: { latitude: 51.5, longitude: -0.12 } }
+            }
+            """);
+        Assert.True(exit == 0, output + err);
+        Assert.Contains("3 checks passed", output);
+
+        var (bad, _, badErr) = await Test("match visits/{id} { allow create: if true; }", """
+            test "t" {
+              allow create visits/v1 with { place: geoPoint(91, 0) }
+            }
+            """);
+        Assert.NotEqual(0, bad);
+        Assert.Contains("a latitude is between -90 and 90", badErr);
+    }
+
+    [Fact]
     public async Task Failures_show_the_line_and_exit_1()
     {
         var (exit, output, _) = await Test(Rules, """
