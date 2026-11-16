@@ -60,7 +60,6 @@ internal static class FunctionsFolder
 {
     private static readonly string[] Kept = [".ts", ".tsx", ".js", ".mjs", ".json"];
 
-    /// <summary>The files to deploy: code and deno.json, not .winche/, node_modules or hidden folders.</summary>
     /// <summary>The emulator's secrets (NAME=value lines) in the functions folder: never deployed, kept out of git.</summary>
     public const string SecretsFile = ".secrets.local";
 
@@ -85,6 +84,10 @@ internal static class FunctionsFolder
         return values;
     }
 
+    /// <summary>
+    /// The files to deploy: code and deno.json, and console pages' web files (HTML, CSS, images, fonts; binary ones as
+    /// base64), not .winche/, node_modules, hidden files or anything else.
+    /// </summary>
     public static Dictionary<string, string> Read(string dir)
     {
         if (!Directory.Exists(dir)) throw new CliException($"There's no folder {dir}. Run: winche functions init");
@@ -93,8 +96,10 @@ internal static class FunctionsFolder
         {
             var rel = Path.GetRelativePath(dir, path).Replace('\\', '/');
             if (rel.Split('/').Any(p => p.StartsWith('.') || p == "node_modules")) continue;
-            if (!Kept.Contains(Path.GetExtension(rel))) continue;
-            files[rel] = File.ReadAllText(path);
+            var ext = Path.GetExtension(rel);
+            if (Winche.Functions.ConsolePages.Binary.Contains(ext))
+                files[rel] = Winche.Functions.ConsolePages.Base64Prefix + Convert.ToBase64String(File.ReadAllBytes(path));
+            else if (Kept.Contains(ext) || Winche.Functions.ConsolePages.Extensions.Contains(ext)) files[rel] = File.ReadAllText(path);
         }
         return files;
     }

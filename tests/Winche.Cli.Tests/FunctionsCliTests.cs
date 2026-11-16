@@ -82,6 +82,9 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         Assert.Equal("functions", JsonNode.Parse(File.ReadAllText(Path.Combine(_dir, "winche.json")))!["functions"]!.GetValue<string>());
         Assert.Contains("added \"functions\"", output);
         File.WriteAllText(Path.Combine(_dir, "functions", "notes.md"), "not code");
+        Directory.CreateDirectory(Path.Combine(_dir, "functions", "console", "reports"));
+        File.WriteAllText(Path.Combine(_dir, "functions", "console", "reports", "index.html"), "<p>Reports</p>");
+        File.WriteAllBytes(Path.Combine(_dir, "functions", "console", "reports", "logo.png"), [0x89, 0x50, 0x4E, 0x47]);
 
         // In CI: a CI token from WINCHE_TOKEN.
         var console = new FakeConsole();
@@ -90,7 +93,8 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         var deploy = console.Requests.Single();
         Assert.Equal(("/_console/api/functions/deploy", "Bearer wct_ci"), (deploy.Path, deploy.Auth));
         var sent = JsonNode.Parse(deploy.Body!)!;
-        Assert.Equal(["deno.json", "index.ts"], sent["files"]!.AsObject().Select(kv => kv.Key).Order());   // not .winche/, .vscode/ or notes
+        Assert.Equal(["console/reports/index.html", "console/reports/logo.png", "deno.json", "index.ts"], sent["files"]!.AsObject().Select(kv => kv.Key).Order());   // not .winche/, .vscode/ or notes
+        Assert.Equal("base64:iVBORw==", sent["files"]!["console/reports/logo.png"]!.GetValue<string>());
         Assert.Equal("From CI", sent["note"]!.GetValue<string>());
         Assert.Contains("Deployed version 4: hello.", output);
 

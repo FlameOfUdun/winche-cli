@@ -327,6 +327,9 @@ readable by you only.
   ("gitlab-main (CI token by ann@example.com)"). It stops working if its maker is no longer an admin, and can't do
   anything but deploy. `winche functions deploy` exits with 1 when the code doesn't bundle, printing the problems.
 
+`winche functions deploy` also sends the project's console pages: the web files (`.html`, `.css`, `.js`, `.svg`, images,
+fonts) of the folders `consolePage({ files })` names. Binary files go as base64.
+
 ### Function secrets
 
 Functions read API keys and passwords with `ctx.secrets.get("NAME")`, declaring them in their options
@@ -335,7 +338,7 @@ Functions read API keys and passwords with `ctx.secrets.get("NAME")`, declaring 
 ```sh
 winche functions secrets                                  # each one: set or not, when, by whom, which functions use it
 winche functions secrets:set MAIL_API_KEY                 # add or replace: typed unseen, or from WINCHE_SECRET
-winche functions secrets:set FIREBASE_SA --from-file sa.json   # a file's contents (a service account's JSON)
+winche functions secrets:set SERVICE_ACCOUNT --from-file sa.json   # a file's contents (a service account's JSON)
 winche functions secrets:remove MAIL_API_KEY
 ```
 
