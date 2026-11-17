@@ -2,7 +2,8 @@ name: Publish
 
 # Push a tag v<version> (the <Version> in the projects, e.g. v1.2.0) to publish every package here to nuget.org.
 # Winche packages depend on each other through nuget.org, so release in order: Winche.Core, Winche.Rules, then
-# Winche.Database, Winche.Storage, Winche.Auth and Winche.Webhooks, then Winche.Functions, then Winche.Cli.
+# Winche.Database, Winche.Storage, Winche.Auth and Winche.Webhooks, then Winche.Assets, then Winche.Functions, then
+# Winche.Cli.
 
 on:
   push:
