@@ -180,18 +180,18 @@ internal static class FunctionsFolder
         if (resources.Count > 0)
         {
             // Only contents the server doesn't have yet are sent; the rest are named by hash.
-            var (asked, answer) = await console.PostAsync("api/functions/resources/missing", new { hashes = resources.Values.Select(a => a.Entry.Hash).Distinct() }, "functions", ct);
+            var (asked, answer) = await console.PostAsync("functions/resources/missing", new { hashes = resources.Values.Select(a => a.Entry.Hash).Distinct() }, "functions", ct);
             if (!asked) { env.Error.WriteLine($"Not deployed: {answer["error"]?["message"]?.GetValue<string>() ?? "the console refused the resources."}"); return 1; }
             var missing = (answer["missing"] as JsonArray ?? []).Select(h => h!.GetValue<string>()).ToHashSet();
             var sending = resources.Where(a => missing.Remove(a.Value.Entry.Hash)).ToList();
             if (sending.Count > 0) env.Out.WriteLine($"Sending {sending.Count} new resource{(sending.Count == 1 ? "" : "s")} ({sending.Sum(a => a.Value.Entry.Size) / 1024.0 / 1024:0.#} MB)…");
             foreach (var (rel, (entry, file)) in sending)
             {
-                var (sent, refusal) = await console.PutBytesAsync($"api/functions/resources/{entry.Hash}", await File.ReadAllBytesAsync(file, ct), "functions", ct);
+                var (sent, refusal) = await console.PutBytesAsync($"functions/resources/{entry.Hash}", await File.ReadAllBytesAsync(file, ct), "functions", ct);
                 if (!sent) { env.Error.WriteLine($"Not deployed: resources/{rel}: {refusal["error"]?["message"]?.GetValue<string>() ?? "the console refused it."}"); return 1; }
             }
         }
-        var (ok, body) = await console.PostAsync("api/functions/deploy",
+        var (ok, body) = await console.PostAsync("functions/deploy",
             new { files, note = note ?? $"Deployed from {Path.GetFileName(Path.GetFullPath(dir))}", resources = resources.ToDictionary(a => a.Key, a => a.Value.Entry) }, "functions", ct);
         if (!ok)
         {

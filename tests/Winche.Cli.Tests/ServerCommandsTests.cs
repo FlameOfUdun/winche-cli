@@ -37,7 +37,7 @@ public sealed class FreshServerFactory(PostgresFixture fx, string name) : WebApp
 [Collection("postgres")]
 public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
 {
-    private const string Url = "http://localhost/_console";
+    private const string Url = "http://localhost";
     private const string Password = "Passw0rd!long";
     private FreshServerFactory _app = null!;
     private readonly string _dir = Directory.CreateTempSubdirectory("winche-cli-server-").FullName;
@@ -85,7 +85,7 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
             "--first-name", "Ann", "--last-name", "Admin");
         Assert.True(setup.Exit == 0, setup.Out + setup.Err);
         await MakeProjectAsync("clinic", "Clinic");
-        File.WriteAllText(Path.Combine(_dir, "winche.json"), $$"""{ "console": "{{Url}}", "rules": {} }""");
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), $$"""{ "server": "{{Url}}", "project": "demo", "rules": {} }""");
     }
 
     /// <summary>
@@ -95,8 +95,8 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     private async Task MakeProjectAsync(string id, string name)
     {
         var console = _app.CreateClient();
-        Assert.True((await console.PostAsJsonAsync("/_console/api/auth/login", new { email = "ann@example.com", password = Password })).IsSuccessStatusCode);
-        var made = await console.PostAsJsonAsync("/_console/api/project", new { name, id, products = Array.Empty<string>() });
+        Assert.True((await console.PostAsJsonAsync("/console/v1/session/login", new { email = "ann@example.com", password = Password })).IsSuccessStatusCode);
+        var made = await console.PostAsJsonAsync("/console/v1/project", new { name, id, products = Array.Empty<string>() });
         Assert.True(made.IsSuccessStatusCode, await made.Content.ReadAsStringAsync());
     }
 
@@ -105,7 +105,7 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     {
         await SetupAsync();
         var login = await Run(null, "login");
-        Assert.Contains("Already signed in to http://localhost/_console as ann@example.com", login.Out);
+        Assert.Contains("Already signed in to http://localhost as ann@example.com", login.Out);
 
         // The project exists, its products off; starting one follows its setup to the end.
         var products = await Run(null, "products");
@@ -147,7 +147,7 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     {
         await SetupAsync();
         using var browser = _app.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
-        (await browser.PostAsJsonAsync("/_console/api/auth/login", new { email = "ann@example.com", password = Password })).EnsureSuccessStatusCode();
+        (await browser.PostAsJsonAsync("/console/v1/session/login", new { email = "ann@example.com", password = Password })).EnsureSuccessStatusCode();
 
         var text = new StringWriter();
         var output = TextWriter.Synchronized(text);
@@ -162,16 +162,16 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         Assert.Contains($"cli-login?user_code={code}", text.ToString());
 
         // The page shows which CLI; a wrong code is refused; the right one is allowed.
-        var device = JsonNode.Parse(await browser.GetStringAsync($"/_console/api/cli-login/device/{code.ToLowerInvariant().Replace("-", "")}"))!;
+        var device = JsonNode.Parse(await browser.GetStringAsync($"/console/v1/cli/device/{code.ToLowerInvariant().Replace("-", "")}"))!;
         Assert.StartsWith("winche CLI on ", device["name"]!.GetValue<string>());
-        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await browser.PostAsJsonAsync("/_console/api/cli-login/approve", new { userCode = "BBBB-BBBB", port = 0 })).StatusCode);
-        (await browser.PostAsJsonAsync("/_console/api/cli-login/approve", new { userCode = code, port = 0 })).EnsureSuccessStatusCode();
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await browser.PostAsJsonAsync("/console/v1/cli/approve", new { userCode = "BBBB-BBBB", port = 0 })).StatusCode);
+        (await browser.PostAsJsonAsync("/console/v1/cli/approve", new { userCode = code, port = 0 })).EnsureSuccessStatusCode();
 
         var result = await login;
         Assert.True(result.Exit == 0, result.Out + result.Err);
-        Assert.Contains("Signed in to http://localhost/_console as ann@example.com", text.ToString());
+        Assert.Contains("Signed in to http://localhost as ann@example.com", text.ToString());
         // Allowed once: the code's used up.
-        Assert.Equal(System.Net.HttpStatusCode.NotFound, (await browser.GetAsync($"/_console/api/cli-login/device/{code}")).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, (await browser.GetAsync($"/console/v1/cli/device/{code}")).StatusCode);
     }
 
     [Fact]
@@ -275,7 +275,7 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         Assert.Contains("No apps registered", (await Run(null, "apps")).Out);
         var made = await Run(null, "apps:create", "Clinic iOS", "--id", "clinic-ios", "--apple-bundle-id", "com.example.clinic", "--web-origin", "https://a.example, https://b.example");
         Assert.True(made.Exit == 0, made.Err);
-        Assert.Contains("winche configure --url http://localhost --app clinic-ios", made.Out);
+        Assert.Contains("winche configure --url http://localhost --project demo --app clinic-ios", made.Out);
         var list = await Run(null, "apps");
         Assert.Contains("clinic-ios", list.Out);
         Assert.Contains("com.example.clinic, https://a.example, https://b.example", list.Out);
@@ -296,8 +296,8 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
 
         // Someone with an account (and no role) gets one.
         using var admin = _app.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
-        (await admin.PostAsJsonAsync("/_console/api/auth/login", new { email = "ann@example.com", password = Password })).EnsureSuccessStatusCode();
-        (await admin.PostAsJsonAsync("/_console/api/users", new { email = "erin@example.com", role = "Viewer", password = Password })).EnsureSuccessStatusCode();
+        (await admin.PostAsJsonAsync("/console/v1/session/login", new { email = "ann@example.com", password = Password })).EnsureSuccessStatusCode();
+        (await admin.PostAsJsonAsync("/console/v1/accounts", new { email = "erin@example.com", role = "Viewer", password = Password })).EnsureSuccessStatusCode();
         Assert.Contains("erin@example.com is now Member here", (await Run(null, "members:add", "erin@example.com")).Out);
         var members = await Run(null, "members");
         Assert.Contains("ann@example.com", members.Out);
@@ -316,8 +316,8 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         Assert.Contains("No pending invites", (await Run(null, "invites")).Out);
 
         using var admin = _app.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
-        (await admin.PostAsJsonAsync("/_console/api/auth/login", new { email = "ann@example.com", password = Password })).EnsureSuccessStatusCode();
-        (await admin.PostAsJsonAsync("/_console/api/users", new { email = "erin@example.com", role = "Member", password = Password })).EnsureSuccessStatusCode();
+        (await admin.PostAsJsonAsync("/console/v1/session/login", new { email = "ann@example.com", password = Password })).EnsureSuccessStatusCode();
+        (await admin.PostAsJsonAsync("/console/v1/accounts", new { email = "erin@example.com", role = "Member", password = Password })).EnsureSuccessStatusCode();
         Assert.Contains("erin@example.com no longer has a role here", (await Run(null, "members:remove", "erin@example.com")).Out);
         Assert.DoesNotContain("erin@example.com", (await Run(null, "members")).Out);
         Assert.Contains("has no access here", (await Run(null, "members:remove", "erin@example.com")).Err);
@@ -355,16 +355,16 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         var approved = await Run(null, "login:approve", code!, "--yes");
         Assert.True(approved.Exit == 0, approved.Err);
         Assert.Equal(0, await waiting);
-        Assert.Contains("Signed in to http://localhost/_console as ann@example.com", text.ToString());
+        Assert.Contains("Signed in to http://localhost as ann@example.com", text.ToString());
 
         // A CI token can't approve anyone.
         var ci = (await Run(null, "tokens:create", "ci", "--scopes", "rules", "--quiet")).Out.Trim();
-        var device = JsonNode.Parse(await (await _app.CreateClient().PostAsJsonAsync("/_console/api/cli-login/device",
+        var device = JsonNode.Parse(await (await _app.CreateClient().PostAsJsonAsync("/console/v1/cli/device",
             new { challenge = new string('a', 43), name = "box" })).Content.ReadAsStringAsync())!;
         _vars["WINCHE_TOKEN"] = ci;
         Assert.NotEqual(0, (await Run(null, "login:approve", device["userCode"]!.GetValue<string>(), "--yes")).Exit);
         _vars.Remove("WINCHE_TOKEN");
-        Assert.Contains("pending", await (await _app.CreateClient().PostAsJsonAsync("/_console/api/cli-login/device/poll",
+        Assert.Contains("pending", await (await _app.CreateClient().PostAsJsonAsync("/console/v1/cli/device/poll",
             new { deviceCode = device["deviceCode"]!.GetValue<string>() })).Content.ReadAsStringAsync());
         Directory.Delete(otherConfig, recursive: true);
     }
@@ -373,7 +373,7 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     public async Task Tokens_quiet_prints_only_the_token_even_with_a_named_project()
     {
         await SetupAsync();
-        File.WriteAllText(Path.Combine(_dir, "winche.json"), $$"""{ "console": "{{Url}}", "projects": { "main": "{{Url}}" }, "rules": {} }""");
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), $$"""{ "server": "{{Url}}", "project": "demo", "projects": { "main": "{{Url}}/projects/demo" }, "rules": {} }""");
         var made = await Run(null, "tokens:create", "ci", "--scopes", "rules", "--quiet");
         Assert.True(made.Exit == 0, made.Err);
         Assert.Matches(@"^wct_\S+\n$", made.Out.Replace("\r", ""));
@@ -388,7 +388,7 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     public async Task Configure_reads_the_named_projects_own_setup()
     {
         var seen = new List<string>();
-        var handler = new Recording(seen, """{ "projectId": "wards", "name": "Wards", "baseUrl": "http://api.example.com/p/wards", "services": [], "providers": [], "app": null }""");
+        var handler = new Recording(seen, """{ "projectId": "wards", "name": "Wards", "baseUrl": "http://api.example.com/projects/wards", "services": [], "providers": [], "app": null }""");
         var env = new CliEnvironment
         {
             Out = new StringWriter(), Error = new StringWriter(), WorkingDirectory = _dir, ConfigDirectory = _configDir,
@@ -396,7 +396,7 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         };
         File.WriteAllText(Path.Combine(_dir, "pubspec.yaml"), "name: demo\n");
         Assert.Equal(0, await CliApp.RunAsync(["configure", "--url", "http://api.example.com", "--project", "wards"], env));
-        Assert.Contains("/p/wards/.well-known/winche", seen);
+        Assert.Contains("/projects/wards/.well-known/winche", seen);
     }
 
     private sealed class Recording(List<string> seen, string body) : HttpMessageHandler

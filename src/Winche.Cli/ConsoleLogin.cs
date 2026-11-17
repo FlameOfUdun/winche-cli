@@ -27,7 +27,7 @@ internal sealed class ConsoleLogin(CliEnvironment env, HttpClient http)
         var challenge = WincheBase64Url.Encode(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
         var state = WincheBase64Url.Encode(RandomNumberGenerator.GetBytes(16));
         var name = Name;
-        var url = new Uri(server, $"cli-login?port={port}&state={state}&challenge={challenge}&name={Uri.EscapeDataString(name)}").AbsoluteUri;
+        var url = new Uri(ConsoleAddress.PagesOf(server), $"cli-login?port={port}&state={state}&challenge={challenge}&name={Uri.EscapeDataString(name)}").AbsoluteUri;
 
         using var listener = new HttpListener();
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
@@ -39,7 +39,7 @@ internal sealed class ConsoleLogin(CliEnvironment env, HttpClient http)
         env.OpenBrowser(url);
 
         var code = await WaitForCodeAsync(listener, state, ct);
-        return await SessionAsync(server, "api/cli-login/token", new { code, verifier }, "Sign-in failed", ct)
+        return await SessionAsync(server, "cli/token", new { code, verifier }, "Sign-in failed", ct)
                ?? throw new CliException("Sign-in failed: the server refused the code. Run winche login again.");
     }
 
@@ -51,23 +51,23 @@ internal sealed class ConsoleLogin(CliEnvironment env, HttpClient http)
     {
         var verifier = WincheBase64Url.Encode(RandomNumberGenerator.GetBytes(32));
         var challenge = WincheBase64Url.Encode(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
-        var started = await PostAsync(server, "api/cli-login/device", new { challenge, name = Name }, ct);
+        var started = await PostAsync(server, "cli/device", new { challenge, name = Name }, ct);
         var deviceCode = started["deviceCode"]!.GetValue<string>();
         var userCode = started["userCode"]!.GetValue<string>();
         var interval = TimeSpan.FromSeconds(Math.Max(1, started["interval"]?.GetValue<int>() ?? 2));
         var until = env.Time.GetUtcNow().AddSeconds(started["expiresIn"]?.GetValue<int>() ?? 600);
 
-        env.Out.WriteLine($"On any device, open {new Uri(server, "cli-login?user_code=" + userCode).AbsoluteUri}");
-        env.Out.WriteLine($"(or {new Uri(server, "cli-login").AbsoluteUri} and enter the code), sign in, and allow the CLI. Your code: {userCode}");
+        env.Out.WriteLine($"On any device, open {new Uri(ConsoleAddress.PagesOf(server), "cli-login?user_code=" + userCode).AbsoluteUri}");
+        env.Out.WriteLine($"(or {new Uri(ConsoleAddress.PagesOf(server), "cli-login").AbsoluteUri} and enter the code), sign in, and allow the CLI. Your code: {userCode}");
         env.Out.WriteLine("Waiting…");
         while (true)
         {
-            var poll = await PostAsync(server, "api/cli-login/device/poll", new { deviceCode }, ct);
+            var poll = await PostAsync(server, "cli/device/poll", new { deviceCode }, ct);
             switch (poll["status"]?.GetValue<string>())
             {
                 case "approved":
                     var code = poll["code"]!.GetValue<string>();
-                    return await SessionAsync(server, "api/cli-login/token", new { code, verifier }, "Sign-in failed", ct)
+                    return await SessionAsync(server, "cli/token", new { code, verifier }, "Sign-in failed", ct)
                            ?? throw new CliException("Sign-in failed: the server refused the code. Run winche login again.");
                 case "pending" when env.Time.GetUtcNow() < until:
                     await Task.Delay(interval, env.Time, ct);
@@ -108,17 +108,17 @@ internal sealed class ConsoleLogin(CliEnvironment env, HttpClient http)
     public async Task<SavedLogin?> FreshAsync(Uri server, SavedLogin login, CancellationToken ct)
     {
         if (login.ExpiresAt > env.Time.GetUtcNow().AddMinutes(1)) return login;
-        return await SessionAsync(server, "api/cli-login/refresh", new { refreshToken = login.RefreshToken, name = Name }, "Renewing your sign-in failed", ct);
+        return await SessionAsync(server, "cli/refresh", new { refreshToken = login.RefreshToken, name = Name }, "Renewing your sign-in failed", ct);
     }
 
     /// <summary>The login renewed (so the server confirms its session is live), or null when it has ended.</summary>
     public Task<SavedLogin?> StillLiveAsync(Uri server, SavedLogin login, CancellationToken ct) =>
-        SessionAsync(server, "api/cli-login/refresh", new { refreshToken = login.RefreshToken, name = Name }, "Checking your sign-in failed", ct);
+        SessionAsync(server, "cli/refresh", new { refreshToken = login.RefreshToken, name = Name }, "Checking your sign-in failed", ct);
 
     /// <summary>Ends the session at the server (offline: it's just forgotten here).</summary>
     public async Task LogoutAsync(Uri server, SavedLogin login, CancellationToken ct)
     {
-        try { using var _ = await http.PostAsJsonAsync(new Uri(server, "api/cli-login/logout"), new { refreshToken = login.RefreshToken }, ct); }
+        try { using var _ = await http.PostAsJsonAsync(new Uri(server, "cli/logout"), new { refreshToken = login.RefreshToken }, ct); }
         catch (HttpRequestException) { }
     }
 

@@ -29,7 +29,7 @@ internal sealed class ConsoleAccountsHost(string consoleConnection, string maste
     public async Task StartAsync(CancellationToken ct) =>
         _app = await Winche.Console.Identity.ConsoleAccountsApp.StartAsync(
             new NpgsqlConnectionStringBuilder(consoleConnection) { SearchPath = "console_accounts" }.ConnectionString, masterKey, [],
-            "http://localhost/_console/accounts", "http://localhost/_console/reset-password", ct: ct);
+            "http://localhost/console/accounts", "http://localhost/console/reset-password", ct: ct);
 
     public async Task StopAsync(CancellationToken ct)
     {

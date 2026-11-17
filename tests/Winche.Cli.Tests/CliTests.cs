@@ -14,7 +14,7 @@ namespace Winche.Cli.Tests;
 [Collection("postgres")]
 public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
 {
-    private const string ConsoleUrl = "http://localhost/_console";
+    private const string ConsoleUrl = "http://localhost/projects/demo";
     private readonly string _dir = Directory.CreateTempSubdirectory("winche-cli-").FullName;
     private readonly string _configDir = Directory.CreateTempSubdirectory("winche-cli-config-").FullName;
     private ConsoleAppFactory? _app;
@@ -68,7 +68,7 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
     [Fact]
     public async Task Indexes_are_pulled_diffed_and_deployed_as_a_file()
     {
-        Write("winche.json", $$"""{ "console": "{{ConsoleUrl}}", "rules": {} }""");
+        Write("winche.json", $$"""{ "server": "http://localhost", "project": "demo", "rules": {} }""");
         var pulled = await Admin("indexes", "pull");
         Assert.True(pulled.Exit == 0, pulled.Out + pulled.Err);
         Write("database.indexes", """
@@ -144,9 +144,9 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
         // The console lists it with the note, and enforces it.
         using var client = App.CreateClient();
         client.DefaultRequestHeaders.Authorization = new("Bearer", await App.AdminTokenAsync());
-        var versions = JsonDocument.Parse(await client.GetStringAsync("/_console/api/rules/database/versions")).RootElement;
+        var versions = JsonDocument.Parse(await client.GetStringAsync("/console/v1/rules/database/versions")).RootElement;
         Assert.Equal("first", versions[0].GetProperty("note").GetString());
-        var live = JsonDocument.Parse(await client.GetStringAsync("/_console/api/rules/database/live")).RootElement;
+        var live = JsonDocument.Parse(await client.GetStringAsync("/console/v1/rules/database/live")).RootElement;
         Assert.Contains("users/{uid}", live.GetProperty("rulesJson").GetString());
 
         // A change deploys as v2.
@@ -210,7 +210,7 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
         await Run(null, null, null, "init", "--console", ConsoleUrl, "--only", "database");
         Write("database.rules", DatabaseRules);
         var admin = await ConsoleTokens.SignedInAsync(App, ConsoleTokens.AdminEmail, setup: true);
-        (await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(admin, "/_console/api/users",
+        (await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(admin, "/console/v1/accounts",
             new { email = "second@example.com", role = "Member", password = ConsoleTokens.Password })).EnsureSuccessStatusCode();
         var member = await ConsoleTokens.SignedInAsync(App, "second@example.com", setup: false);
         var browser = admin;   // who's signed in to the browser that approves
@@ -220,11 +220,11 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
         {
             var q = System.Web.HttpUtility.ParseQueryString(new Uri(url).Query);
             Assert.Equal(port.ToString(), q["port"]);
-            Assert.StartsWith(ConsoleUrl + "/cli-login", url);
+            Assert.StartsWith("http://localhost/console/cli-login", url);   // the console's page, whichever project
             var by = browser;
             _ = Task.Run(async () =>
             {
-                var approved = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(by, "/_console/api/cli-login/approve",
+                var approved = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(by, "/console/v1/cli/approve",
                     new { challenge = q["challenge"], port = int.Parse(q["port"]!), state = q["state"], name = q["name"] });
                 var redirect = JsonDocument.Parse(await approved.Content.ReadAsStringAsync()).RootElement.GetProperty("redirect").GetString()!;
                 await loopback.GetAsync(redirect);
@@ -235,7 +235,7 @@ public sealed class CliTests(PostgresFixture fx) : IAsyncLifetime, IDisposable
         Assert.True(login.Exit == 0, login.Out + login.Err);
         Assert.Contains("as admin@example.com", login.Out);
         var store = JsonDocument.Parse(File.ReadAllText(Path.Combine(_configDir, "credentials.json"))).RootElement;
-        Assert.Equal("admin@example.com", store.GetProperty("servers").GetProperty(ConsoleUrl).GetProperty("active").GetString());
+        Assert.Equal("admin@example.com", store.GetProperty("servers").GetProperty("http://localhost").GetProperty("active").GetString());
         Assert.Contains("Already signed in", (await Run(null, null, null, "login")).Out);   // no browser: says so
 
         var deploy = await Run(null, null, null, "rules", "deploy");

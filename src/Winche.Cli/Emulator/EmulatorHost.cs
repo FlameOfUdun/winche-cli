@@ -197,6 +197,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.UseFileSystemArchive(fs =>
             {
                 fs.Root = Path.Combine(data, "storage");
+                fs.RoutePrefix = "/files/v1/signed";   // as on Winche Server
             });
         });
         // Assets: the assets folder published as releases on its channel (again on every save), in the data folder.
@@ -209,6 +210,8 @@ internal sealed class EmulatorHost : IAsyncDisposable
         builder.Services.AddCors(c => c.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
         var app = builder.Build();
+        // The project's address, as on Winche Server: /projects/<id>/… (the root answers too, for apps set up before).
+        app.UsePathBase($"/projects/{options.ProjectId}");
         app.UseCors();
         if (!options.Quiet) app.Use(RequestLog(output));
         app.UseWebSockets();
@@ -245,7 +248,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
         baseUrl = address.Replace("127.0.0.1", "localhost").Replace("[::1]", "localhost").TrimEnd('/');
 
-        var host = new EmulatorHost(app, postgres, tempData, baseUrl, connection, data, output);
+        var host = new EmulatorHost(app, postgres, tempData, baseUrl, connection, data, output) { ProjectUrl = $"{baseUrl}/projects/{options.ProjectId}" };
         host.Watch(options.DatabaseRules, WincheDatabaseKeys.RuleEngine);
         host.Watch(options.StorageRules, WincheStorageKeys.RULE_ENGINE_KEY);
         host.Watch(options.AssetsRules, AssetsServiceCollectionExtensions.RulesKey);
@@ -254,18 +257,22 @@ internal sealed class EmulatorHost : IAsyncDisposable
         return host;
     }
 
+    /// <summary>The project's address, as on Winche Server (<c>…/projects/&lt;id&gt;</c>): what apps use as their base URL.</summary>
+    public string ProjectUrl { get; private init; } = "";
+
     public void PrintBanner(string? databaseRules, string? storageRules, string? assetsRules = null)
     {
         var rules = string.Join(", ", new[] { databaseRules, storageRules, assetsRules }.Where(r => r is not null).Select(r => Path.GetFileName(r!)));
         _out.WriteLine();
         _out.WriteLine($"Winche emulator is running{(rules.Length > 0 ? $" — rules from {rules}, reloaded on save" : " — no rules files, so everything is denied")}");
         _out.WriteLine();
-        _out.WriteLine($"  Database (REST)   {BaseUrl}/documents/v1");
-        _out.WriteLine($"  Database (live)   {BaseUrl.Replace("http", "ws")}/documents/v1/ws");
-        _out.WriteLine($"  Storage           {BaseUrl}/files/v1");
-        _out.WriteLine($"  Auth              {BaseUrl}/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)");
-        _out.WriteLine($"  Functions         {BaseUrl}/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)");
-        _out.WriteLine($"  Assets            {BaseUrl}/assets/v1/channels/<channel>   (the assets folder, on save; winche assets init makes one)");
+        _out.WriteLine($"  Project           {ProjectUrl}   (apps' base URL)");
+        _out.WriteLine($"  Database (REST)   {ProjectUrl}/documents/v1");
+        _out.WriteLine($"  Database (live)   {ProjectUrl.Replace("http", "ws")}/documents/v1/ws");
+        _out.WriteLine($"  Storage           {ProjectUrl}/files/v1");
+        _out.WriteLine($"  Auth              {ProjectUrl}/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)");
+        _out.WriteLine($"  Functions         {ProjectUrl}/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)");
+        _out.WriteLine($"  Assets            {ProjectUrl}/assets/v1/channels/<channel>   (the assets folder, on save; winche assets init makes one)");
         _out.WriteLine($"  Postgres          {(TemporaryDatabase ? "temporary (gone when the emulator stops)" : "the one you passed with --pg")}");
         _out.WriteLine();
         _out.WriteLine("  Sign in as anyone with an unsigned token:");

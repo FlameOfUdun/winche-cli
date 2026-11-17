@@ -341,7 +341,7 @@ internal sealed class LanguageServer(Stream input, Stream output, CliEnvironment
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get,
-                new Uri(console, $"api/rules/{subsystem}/fields?pattern={Uri.EscapeDataString(pattern)}"));
+                ConsoleAddress.Url(console, $"rules/{subsystem}/fields?pattern={Uri.EscapeDataString(pattern)}"));
             request.Headers.Authorization = new("Bearer", token);
             using var response = await http.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType != "application/json") return empty;

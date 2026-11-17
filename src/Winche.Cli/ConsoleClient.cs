@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 
 namespace Winche.Cli;
 
-/// <summary>The console's rules API (<c>{console}/api/rules/...</c>), called with a bearer token.</summary>
+/// <summary>The console's rules API (<c>{console}/rules/...</c>), called with a bearer token.</summary>
 internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
 {
     internal sealed record VersionSummary(
@@ -31,34 +31,34 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         [property: JsonPropertyName("message")] string Message);
 
     public async Task<IReadOnlyList<VersionSummary>> GetVersionsAsync(string subsystem, CancellationToken ct) =>
-        await SendAsync<List<VersionSummary>>(HttpMethod.Get, $"api/rules/{subsystem}/versions", null, subsystem, ct) ?? [];
+        await SendAsync<List<VersionSummary>>(HttpMethod.Get, $"rules/{subsystem}/versions", null, subsystem, ct) ?? [];
 
     public async Task<VersionDetail?> GetActiveAsync(string subsystem, CancellationToken ct)
     {
         var active = (await GetVersionsAsync(subsystem, ct)).FirstOrDefault(v => v.IsActive);
         return active is null
             ? null
-            : await SendAsync<VersionDetail>(HttpMethod.Get, $"api/rules/{subsystem}/versions/{active.Version}", null, subsystem, ct);
+            : await SendAsync<VersionDetail>(HttpMethod.Get, $"rules/{subsystem}/versions/{active.Version}", null, subsystem, ct);
     }
 
     /// <summary>The rules the server enforces right now (a saved version, or the app's starting rules).</summary>
     public async Task<string> GetLiveAsync(string subsystem, CancellationToken ct) =>
-        (await SendAsync<RulesJsonBody>(HttpMethod.Get, $"api/rules/{subsystem}/live", null, subsystem, ct))!.RulesJson;
+        (await SendAsync<RulesJsonBody>(HttpMethod.Get, $"rules/{subsystem}/live", null, subsystem, ct))!.RulesJson;
 
     public async Task<VersionDetail> GetVersionAsync(string subsystem, int version, CancellationToken ct) =>
-        (await SendAsync<VersionDetail>(HttpMethod.Get, $"api/rules/{subsystem}/versions/{version}", null, subsystem, ct, $"{subsystem} has no version {version}."))!;
+        (await SendAsync<VersionDetail>(HttpMethod.Get, $"rules/{subsystem}/versions/{version}", null, subsystem, ct, $"{subsystem} has no version {version}."))!;
 
     /// <summary>Makes <paramref name="version"/> active again, as a new version (like the console's Revert).</summary>
     public async Task<VersionDetail> RevertAsync(string subsystem, int version, CancellationToken ct) =>
-        (await SendAsync<VersionDetail>(HttpMethod.Post, $"api/rules/{subsystem}/revert/{version}", null, subsystem, ct, $"{subsystem} has no version {version}."))!;
+        (await SendAsync<VersionDetail>(HttpMethod.Post, $"rules/{subsystem}/revert/{version}", null, subsystem, ct, $"{subsystem} has no version {version}."))!;
 
     public async Task<VersionDetail> SaveAsync(string subsystem, string rulesJson, string note, int? expectedHead, CancellationToken ct) =>
-        (await SendAsync<VersionDetail>(HttpMethod.Post, $"api/rules/{subsystem}",
+        (await SendAsync<VersionDetail>(HttpMethod.Post, $"rules/{subsystem}",
             new { rulesJson, note, expectedHeadVersion = expectedHead }, subsystem, ct))!;
 
     private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, string subsystem, CancellationToken ct, string? notFound = null)
     {
-        using var request = new HttpRequestMessage(method, new Uri(console, path));
+        using var request = new HttpRequestMessage(method, ConsoleAddress.Url(console, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         if (body is not null) request.Content = JsonContent.Create(body);
@@ -70,7 +70,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         }
         catch (HttpRequestException ex)
         {
-            throw new CliException($"Can't reach the console at {console} ({ex.Message}).");
+            throw new CliException($"Can't reach {ConsoleAddress.Describe(console)} ({ex.Message}).");
         }
 
         using (response)
@@ -101,7 +101,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
             if (!response.IsSuccessStatusCode)
                 throw new CliException($"The console answered {(int)response.StatusCode} {response.ReasonPhrase}.");
             if (response.Content.Headers.ContentType?.MediaType != "application/json")
-                throw new CliException($"{console} doesn't look like a Winche console (got {response.Content.Headers.ContentType?.MediaType ?? "no content type"}). Check the URL ends with the console's prefix, e.g. /_console.");
+                throw new CliException($"{ConsoleAddress.Describe(console)} doesn't look like a Winche Server 3.0 (got {response.Content.Headers.ContentType?.MediaType ?? "no content type"}).");
             return TryRead<T>(text) ?? throw new CliException("The console sent an unreadable response.");
         }
     }
@@ -112,30 +112,30 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
     /// </summary>
     public async Task<(HttpStatusCode Status, System.Text.Json.Nodes.JsonObject Body)> SendAsync(HttpMethod method, string path, object? body, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(method, new Uri(console, path));
+        using var request = new HttpRequestMessage(method, ConsoleAddress.Url(console, path));
         if (body is not null) request.Content = JsonContent.Create(body);
         if (token.Length > 0) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         HttpResponseMessage response;
         try { response = await http.SendAsync(request, ct); }
-        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach {ConsoleAddress.Describe(console)} ({ex.Message})."); }
         using (response)
         {
             var text = await response.Content.ReadAsStringAsync(ct);
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw Refused();
-            if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{console}: this project is archived.");
+            if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{ConsoleAddress.Describe(console)}: this project is archived.");
             if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) await NotAProjectAsync(path, ct);
             return (response.StatusCode, (text.Length > 0 ? TryNode(text) : null) ?? []);
         }
     }
 
-    /// <summary>GETs a JSON list (<c>api/users</c>, <c>api/invites</c>): its items, or the refusal.</summary>
+    /// <summary>GETs a JSON list (<c>accounts</c>, <c>invites</c>): its items, or the refusal.</summary>
     public async Task<System.Text.Json.Nodes.JsonArray> GetListAsync(string path, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(console, path));
+        using var request = new HttpRequestMessage(HttpMethod.Get, ConsoleAddress.Url(console, path));
         if (token.Length > 0) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         HttpResponseMessage response;
         try { response = await http.SendAsync(request, ct); }
-        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach {ConsoleAddress.Describe(console)} ({ex.Message})."); }
         using (response)
         {
             var text = await response.Content.ReadAsStringAsync(ct);
@@ -147,28 +147,13 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
         }
     }
 
-    /// <summary>
-    /// A project's page asked of the server's own console (the root, which has no project): says to pick a project.
-    /// Asked of the console only on a 404, and only where the address isn't a project's (<c>/p/&lt;id&gt;/…</c>).
-    /// </summary>
-    private async Task NotAProjectAsync(string path, CancellationToken ct)
-    {
-        if (console.AbsolutePath.Contains("/p/", StringComparison.Ordinal)) return;
-        if (path.StartsWith("api/projects", StringComparison.Ordinal) || path.StartsWith("api/server", StringComparison.Ordinal)
-            || path.StartsWith("api/auth", StringComparison.Ordinal) || path.StartsWith("api/cli-login", StringComparison.Ordinal)) return;
-        try
-        {
-            using var state = await http.GetAsync(new Uri(console, "api/auth/state"), ct);
-            if (!state.IsSuccessStatusCode || TryNode(await state.Content.ReadAsStringAsync(ct))?["server"]?.GetValue<bool>() != true) return;
-        }
-        catch (HttpRequestException) { return; }
-        throw new CliException($"{console} is the server's own console, which has no project: pick one with --project <id> (winche projects lists them), or winche use --add <alias> {new Uri(console, "../p/<id>/_console").ToString().Replace("%3C", "<").Replace("%3E", ">")}.");
-    }
+    /// <summary>Nothing more to say on a 404 (a project's area without a project is refused before the call: <see cref="ConsoleAddress.Url"/>).</summary>
+    private static Task NotAProjectAsync(string path, CancellationToken ct) => Task.CompletedTask;
 
     /// <summary>A 401: a CI token that may not do this (or was revoked, or expired), or a sign-in that has ended.</summary>
     private CliException Refused() => token.StartsWith("wct_", StringComparison.Ordinal)
         ? new CliException("The CI token was refused: a CI token only deploys what its scopes allow (functions, rules, indexes, assets), and stops once revoked or expired.")
-        : new CliException($"Your sign-in to {console} was refused: it has ended (signed out, everywhere too, or the account was turned off). Run: winche login");
+        : new CliException($"Your sign-in to {ConsoleAddress.Describe(console)} was refused: it has ended (signed out, everywhere too, or the account was turned off). Run: winche login");
 
     /// <summary>What a refusal says: its message, and its list of problems.</summary>
     public static string ErrorText(System.Text.Json.Nodes.JsonObject body, HttpStatusCode status)
@@ -189,16 +174,16 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
     /// <summary>GETs <paramref name="path"/> as JSON; sign-in and role problems throw.</summary>
     public async Task<System.Text.Json.Nodes.JsonObject> GetJsonAsync(string path, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(console, path));
+        using var request = new HttpRequestMessage(HttpMethod.Get, ConsoleAddress.Url(console, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         HttpResponseMessage response;
         try { response = await http.SendAsync(request, ct); }
-        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach {ConsoleAddress.Describe(console)} ({ex.Message})."); }
         using (response)
         {
             var text = await response.Content.ReadAsStringAsync(ct);
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw Refused();
-            if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{console}: this project is archived.");
+            if (response.StatusCode == HttpStatusCode.Gone) throw new CliException($"{ConsoleAddress.Describe(console)}: this project is archived.");
             if (response.StatusCode == HttpStatusCode.Forbidden)
                 throw new CliException("Your account can't see this here: it has no role in this project (or not enough). See your projects: winche projects");
             if (response.StatusCode == HttpStatusCode.NotFound) await NotAProjectAsync(path, ct);
@@ -246,11 +231,11 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
 
     private async Task<(bool Ok, System.Text.Json.Nodes.JsonObject Body)> SendContentAsync(HttpMethod method, string path, HttpContent? content, string what, CancellationToken ct, bool missingOk = false)
     {
-        using var request = new HttpRequestMessage(method, new Uri(console, path)) { Content = content };
+        using var request = new HttpRequestMessage(method, ConsoleAddress.Url(console, path)) { Content = content };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         HttpResponseMessage response;
         try { response = await http.SendAsync(request, ct); }
-        catch (HttpRequestException ex) { throw new CliException($"Can't reach the console at {console} ({ex.Message})."); }
+        catch (HttpRequestException ex) { throw new CliException($"Can't reach {ConsoleAddress.Describe(console)} ({ex.Message})."); }
         using (response)
         {
             var text = await response.Content.ReadAsStringAsync(ct);
@@ -287,7 +272,7 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
 
     private async Task<bool> HasSubsystemAsync(string subsystem, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(console, $"api/rules/{subsystem}/versions"));
+        using var request = new HttpRequestMessage(HttpMethod.Get, ConsoleAddress.Url(console, $"rules/{subsystem}/versions"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await http.SendAsync(request, ct);
         return response.IsSuccessStatusCode;

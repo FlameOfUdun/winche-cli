@@ -7,21 +7,28 @@ namespace Winche.Cli;
 /// <c>winche.json</c>, found in the working directory or the nearest parent:
 /// <code>
 /// {
-///   "console": "https://api.example.com/_console",
-///   "projects": { "dev": "http://localhost:5000/_console", "prod": "https://api.example.com/_console" },
+///   "server": "https://api.example.com",
+///   "project": "clinic",
+///   "projects": { "dev": "http://localhost:5000/projects/clinic", "prod": "https://api.example.com/projects/clinic" },
 ///   "rules": { "database": "database.rules", "storage": "storage.rules", "assets": "assets.rules" },
 ///   "assets": { "folder": "assets", "channel": "production" },
 ///   "tests": { "database": "database.rules.test" }
 /// }
 /// </code>
 /// Paths are relative to the file's directory. <c>tests</c> (optional) are <c>winche rules test</c>'s case files.
-/// <c>projects</c> (optional) names consoles; <c>winche use &lt;alias&gt;</c> picks one (<see cref="Target"/>).
+/// <c>server</c> and <c>project</c>: the Winche Server and the project commands work on. <c>projects</c> (optional)
+/// names projects by their address (<c>https://host/projects/&lt;id&gt;</c>); <c>winche use &lt;alias&gt;</c> picks one.
 /// </summary>
 internal sealed class ProjectConfig
 {
     public const string FileName = "winche.json";
 
+    /// <summary>Before Winche Server 3.0: a console's address. Refused, with how to write <see cref="Server"/> and <see cref="Project"/>.</summary>
     [JsonPropertyName("console")] public string? Console { get; set; }
+    /// <summary>The Winche Server (<c>https://host</c>).</summary>
+    [JsonPropertyName("server")] public string? Server { get; set; }
+    /// <summary>The project's id on <see cref="Server"/>.</summary>
+    [JsonPropertyName("project")] public string? Project { get; set; }
     [JsonPropertyName("projects")] public Dictionary<string, string>? Projects { get; set; }
     [JsonPropertyName("rules")] public Dictionary<string, string> Rules { get; set; } = new(StringComparer.Ordinal);
     [JsonPropertyName("tests")] public Dictionary<string, string>? Tests { get; set; }
@@ -110,14 +117,18 @@ internal sealed class AssetsConfig
 /// <summary>Which console a command talks to, and the project alias it came from (if any).</summary>
 internal sealed record ConsoleTarget(Uri Url, string? Alias)
 {
-    public string Describe() => Alias is null ? Url.ToString().TrimEnd('/') : $"{Alias} ({Url.ToString().TrimEnd('/')})";
+    public string Describe() => Alias is null ? ConsoleAddress.Describe(Url) : $"{Alias} ({ConsoleAddress.Describe(Url)})";
 
     /// <summary>
-    /// The console: <c>--console</c>, else <c>--project</c>, else <c>WINCHE_CONSOLE</c>, else the project chosen
-    /// with <c>winche use</c>, else the only project, else <c>"console"</c> in winche.json.
+    /// The project (or server): <c>--console</c>, else <c>--project</c>, else <c>WINCHE_CONSOLE</c>, else the project
+    /// chosen with <c>winche use</c>, else the only alias, else <c>"server"</c> and <c>"project"</c> in winche.json.
     /// </summary>
     public static ConsoleTarget? Resolve(ProjectConfig? config, string? consoleArg, string? projectArg, CliEnvironment env)
     {
+        if (config?.Console is { } old)
+            throw new CliException($"{ProjectConfig.FileName}: \"console\" ({old}) is how Winche Server named a project before 3.0. Write \"server\": \"https://host\" and \"project\": \"<id>\" instead.");
+        if (config?.Projects?.Values.FirstOrDefault(v => v.Contains("_console", StringComparison.Ordinal) || v.Contains("/p/", StringComparison.Ordinal)) is { } oldAlias)
+            throw new CliException($"{ProjectConfig.FileName}: \"projects\" names {oldAlias}, an address before Winche Server 3.0. Write each as the project's address: https://host/projects/<id>.");
         // --console with --project <id>: that project on the same server (an id, not an alias of winche.json's).
         if (consoleArg is not null)
             return projectArg is not null && WincheIds.IsValid(projectArg) && config?.Projects?.ContainsKey(projectArg) != true
@@ -127,7 +138,7 @@ internal sealed record ConsoleTarget(Uri Url, string? Alias)
         if (projectArg is not null)
         {
             if (projects.TryGetValue(projectArg, out var url)) return new(Parse(url), projectArg);
-            // Without aliases: a project id on the same Winche Server as the console otherwise used (/p/<id>/…). With
+            // Without aliases: a project id on the same Winche Server as the one otherwise used. With
             // aliases, an unknown name is a typo, not a project to go looking for.
             if (projects.Count == 0 && Resolve(config, null, null, env) is { } server && WincheIds.IsValid(projectArg))
                 return new(ForProject(server.Url, projectArg), projectArg);
@@ -141,30 +152,18 @@ internal sealed record ConsoleTarget(Uri Url, string? Alias)
                 ? new(Parse(url), active)
                 : throw new CliException($"The active project '{active}' isn't in {ProjectConfig.FileName} any more. Pick one: winche use <alias>");
         if (projects.Count == 1) return new(Parse(projects.Values.First()), projects.Keys.First());
-        if (config?.Console is { } single) return new(Parse(single), null);
+        if (config?.Server is { } configured)
+            return new(config.Project is { Length: > 0 } project ? ForProject(Parse(configured), project) : Parse(configured), null);
         if (projects.Count > 1)
             throw new CliException($"Which project? Run winche use <alias> ({string.Join(", ", projects.Keys)}), or pass --project.");
         return null;
     }
 
-    /// <summary>
-    /// The console of project <paramref name="id"/> on the same Winche Server as <paramref name="console"/>:
-    /// <c>https://host/_console</c> or <c>https://host/p/other/_console</c> → <c>https://host/p/&lt;id&gt;/_console</c>.
-    /// </summary>
-    public static Uri ForProject(Uri console, string id)
-    {
-        var path = console.AbsolutePath.TrimEnd('/');
-        var last = path.LastIndexOf('/');
-        var (root, prefix) = last < 0 ? ("", path) : (path[..last], path[last..]);
-        var marker = root.LastIndexOf("/p/", StringComparison.Ordinal);
-        if (marker >= 0 && root.IndexOf('/', marker + 3) < 0) root = root[..marker];
-        return new Uri(console, $"{root}/p/{Uri.EscapeDataString(id)}{prefix}/");
-    }
+    /// <summary>Project <paramref name="id"/> on the same Winche Server as <paramref name="console"/>.</summary>
+    public static Uri ForProject(Uri console, string id) => ConsoleAddress.ForProject(console, id);
 
-    public static Uri Parse(string raw) =>
-        Uri.TryCreate(raw.TrimEnd('/') + "/", UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
-            ? uri
-            : throw new CliException($"'{raw}' isn't a console URL (expected https://host/prefix).");
+    /// <summary>The server's address (<c>https://host</c>) or a project's (<c>https://host/projects/&lt;id&gt;</c>).</summary>
+    public static Uri Parse(string raw) => ConsoleAddress.Parse(raw);
 }
 
 /// <summary>

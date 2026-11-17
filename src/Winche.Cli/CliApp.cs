@@ -281,7 +281,7 @@ internal static partial class CliApp
 
         private ConsoleTarget Target() =>
             ConsoleTarget.Resolve(Config, args.Value("console"), args.Value("project"), env)
-            ?? throw new CliException($"Which console? Pass --console <url>, set WINCHE_CONSOLE, or add \"projects\" (winche use --add <alias> <url>) or \"console\" to {ProjectConfig.FileName}.");
+            ?? throw new CliException($"Which project? Pass --console https://host --project <id>, set WINCHE_CONSOLE, or add \"server\" and \"project\" (or \"projects\": winche use --add <alias> https://host/projects/<id>) to {ProjectConfig.FileName}.");
 
         private Uri ConsoleUrl() => Target().Url;
 
@@ -347,7 +347,13 @@ internal static partial class CliApp
             var path = Path.Combine(env.WorkingDirectory, ProjectConfig.FileName);
             if (File.Exists(path)) throw new CliException($"{ProjectConfig.FileName} already exists here.");
 
-            var config = new ProjectConfig { Console = args.Value("console") };
+            // --console https://host[/projects/<id>] (and --project <id>): the server and project in winche.json.
+            var at = args.Value("console") is { } given ? ConsoleTarget.Parse(given) : null;
+            var config = new ProjectConfig
+            {
+                Server = at is null ? null : ConsoleAddress.RootOf(at).ToString().TrimEnd('/'),
+                Project = args.Value("project") ?? (at is null ? null : ConsoleAddress.ProjectOf(at)),
+            };
             // Database and storage unless --only names others (assets: winche assets init).
             foreach (var sys in args.Value("only") is null ? ["database", "storage"] : Selected(ProjectConfig.Subsystems))
             {
@@ -366,8 +372,8 @@ internal static partial class CliApp
             config.Save(path);
             env.Out.WriteLine($"  created {ProjectConfig.FileName}");
             env.Out.WriteLine();
-            env.Out.WriteLine(config.Console is null
-                ? $"Next: add \"console\" to {ProjectConfig.FileName}, run winche login, then winche rules deploy."
+            env.Out.WriteLine(config.Server is null || config.Project is null
+                ? $"Next: add \"server\" and \"project\" to {ProjectConfig.FileName}, run winche login, then winche rules deploy."
                 : "Next: winche login, then winche rules deploy.");
             return 0;
         }
@@ -467,7 +473,7 @@ internal static partial class CliApp
 
         // ----- indexes -----------------------------------------------------------------------------
 
-        private const string IndexesApi = "api/settings/database/indexes";
+        private const string IndexesApi = "settings/database/indexes";
 
         private string IndexesFile()
         {
@@ -543,18 +549,18 @@ internal static partial class CliApp
         /// <summary>The projects on the console's Winche Server that this account may use (and the archived, for server admins).</summary>
         public async Task<int> ProjectsAsync(CancellationToken ct)
         {
-            var body = await (await ClientAsync(ct)).GetJsonAsync("api/projects", ct);
+            var body = await (await ClientAsync(ct)).GetJsonAsync("projects", ct);
             var console = ConsoleUrl();
             if (body["available"]?.GetValue<bool>() != true)
             {
-                env.Out.WriteLine($"{console} runs one project: {body["current"]}.");
+                env.Out.WriteLine($"{ConsoleAddress.Describe(console)} runs one project: {body["current"]}.");
                 return 0;
             }
             var current = body["current"]?.GetValue<string>();
             foreach (var p in body["projects"]!.AsArray())
             {
                 var id = p!["id"]!.GetValue<string>();
-                var url = new Uri(console, p["consoleUrl"]!.GetValue<string>().TrimEnd('/') + "/");
+                var url = ConsoleAddress.Describe(ConsoleTarget.ForProject(console, id));
                 env.Out.WriteLine($"{(id == current ? "*" : " ")} {id,-24} {p["name"]}  {url}");
             }
             if (body["archived"]?.AsArray() is { Count: > 0 } archived)
@@ -575,11 +581,11 @@ internal static partial class CliApp
         public async Task<int> ConfigureAsync(CancellationToken ct)
         {
             var url = (args.Value("url") ?? env.GetVariable("WINCHE_SERVER") ?? $"http://localhost:{args.Value("port") ?? "9090"}").TrimEnd('/');
-            // --project <id>: that project on a Winche Server with several (/p/<id>).
+            // --project <id>: that project on a Winche Server (its address, /projects/<id>).
             if (args.Value("project") is { } projectId && args.Value("url") is not null)
             {
                 if (!WincheIds.IsValid(projectId)) throw new CliException($"--project {projectId} isn't a project id.", 2);
-                url = $"{url}/p/{projectId}";
+                url = $"{url}/projects/{projectId}";
             }
             if (!Uri.TryCreate(url, UriKind.Absolute, out var server) || server.Scheme is not ("http" or "https"))
                 throw new CliException($"{url} isn't an address. Pass --url https://api.example.com", 2);
@@ -678,7 +684,7 @@ internal static partial class CliApp
                 return 0;
             }
 
-            env.Out.WriteLine($"Emulators at {host.BaseUrl}; running: {command}");
+            env.Out.WriteLine($"Emulators at {host.ProjectUrl}; running: {command}");
             var psi = OperatingSystem.IsWindows()
                 ? new System.Diagnostics.ProcessStartInfo("cmd.exe", ["/c", command])
                 : new System.Diagnostics.ProcessStartInfo("/bin/sh", ["-c", command]);

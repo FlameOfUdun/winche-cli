@@ -33,18 +33,13 @@ internal sealed class CredentialStore(string directory)
     }
 
     /// <summary>
-    /// The server's console for a project's (<c>…/p/wards/_console/</c> → <c>…/_console/</c>): where the CLI signs in, once
-    /// for every project there.
+    /// The server's console API for a project's (<c>…/console/v1/projects/wards/</c> → <c>…/console/v1/</c>): where the
+    /// CLI signs in, once for every project there.
     /// </summary>
-    public static Uri ServerOf(Uri console)
-    {
-        var segments = console.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var path = segments.Length >= 3 && segments[0] == "p" ? string.Join('/', segments[2..]) : string.Join('/', segments);
-        return new Uri(console, "/" + path + "/");
-    }
+    public static Uri ServerOf(Uri console) => ConsoleAddress.ServerOf(console);
 
-    /// <summary>How a server is named in the store and in messages: its console's address.</summary>
-    public static string Key(Uri console) => ServerOf(console).ToString().TrimEnd('/');
+    /// <summary>How a server is named in the store and in messages: its address (<c>https://host</c>).</summary>
+    public static string Key(Uri console) => ConsoleAddress.RootOf(console).ToString().TrimEnd('/');
 
     private File_ Load()
     {

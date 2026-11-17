@@ -44,30 +44,30 @@ internal static partial class CliApp
         {
             email = Ask("Their email", email, option: "the email: winche members:remove <email>");
             var client = await ClientAsync(ct);
-            var (status, body) = await client.SendAsync(HttpMethod.Get, "api/members", null, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Get, "members", null, ct);
             if (status == HttpStatusCode.OK)
             {
                 var member = body["members"]?.AsArray().FirstOrDefault(m => Same(m?["email"], email))
                     ?? throw new CliException(body["serverAdmins"]?.AsArray().Any(a => Same(a?["email"], email)) == true
                         ? $"{email} is a server admin: an admin of every project (winche server users to change that)."
                         : $"{email} isn't a member here. See: winche members");
-                await OkAsync(client.SendAsync(HttpMethod.Delete, $"api/members/{member["userId"]}", null, ct), "Not removed");
+                await OkAsync(client.SendAsync(HttpMethod.Delete, $"members/{member["userId"]}", null, ct), "Not removed");
                 env.Out.WriteLine($"Removed {email} from the project.");
                 return 0;
             }
             if (!NoMemberList(status)) throw new CliException(ConsoleClient.ErrorText(body, status));
 
             // An app's own console: an invite, or the account's own role.
-            if ((await client.GetListAsync("api/invites", ct)).FirstOrDefault(i => Same(i?["email"], email) && i?["status"]?.ToString() == "pending") is { } invite)
+            if ((await client.GetListAsync("invites", ct)).FirstOrDefault(i => Same(i?["email"], email) && i?["status"]?.ToString() == "pending") is { } invite)
             {
-                await OkAsync(client.SendAsync(HttpMethod.Delete, $"api/invites/{invite["id"]}", null, ct), "Not revoked");
+                await OkAsync(client.SendAsync(HttpMethod.Delete, $"invites/{invite["id"]}", null, ct), "Not revoked");
                 env.Out.WriteLine($"Revoked {email}'s invite.");
                 return 0;
             }
-            var user = (await client.GetListAsync("api/users", ct)).FirstOrDefault(u => Same(u?["email"], email) && u?["role"] is not null)
+            var user = (await client.GetListAsync("accounts", ct)).FirstOrDefault(u => Same(u?["email"], email) && u?["role"] is not null)
                 ?? throw new CliException($"{email} has no access here. See: winche members");
             if (user["role"]?.ToString() == "Admin") Confirm($"{email} is a server admin: taking the role away removes that too. Go ahead?");
-            await OkAsync(client.SendAsync(HttpMethod.Put, $"api/users/{user["id"]}", new { role = "none" }, ct), "Not removed");
+            await OkAsync(client.SendAsync(HttpMethod.Put, $"accounts/{user["id"]}", new { role = "none" }, ct), "Not removed");
             env.Out.WriteLine($"{email} no longer has a role here (their account stays, with any other projects).");
             return 0;
         }
@@ -77,7 +77,7 @@ internal static partial class CliApp
         /// <summary><c>winche invites</c>: pending invites to an app's own console (a server's projects invite through members:add).</summary>
         public async Task<int> InvitesAsync(CancellationToken ct)
         {
-            var invites = (await (await ClientAsync(ct)).GetListAsync("api/invites", ct)).Where(i => i?["status"]?.ToString() == "pending").ToList();
+            var invites = (await (await ClientAsync(ct)).GetListAsync("invites", ct)).Where(i => i?["status"]?.ToString() == "pending").ToList();
             if (invites.Count == 0) env.Out.WriteLine("No pending invites.");
             foreach (var i in invites) env.Out.WriteLine($"  {i!["email"],-32} {i["role"],-8} until {i["expiresAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd}");
             return 0;
@@ -88,9 +88,9 @@ internal static partial class CliApp
         {
             email = Ask("Their email", email, option: "the email: winche invites:revoke <email>");
             var client = await ClientAsync(ct);
-            var invite = (await client.GetListAsync("api/invites", ct)).FirstOrDefault(i => Same(i?["email"], email) && i?["status"]?.ToString() == "pending")
+            var invite = (await client.GetListAsync("invites", ct)).FirstOrDefault(i => Same(i?["email"], email) && i?["status"]?.ToString() == "pending")
                 ?? throw new CliException($"No pending invite for {email}. See: winche invites");
-            await OkAsync(client.SendAsync(HttpMethod.Delete, $"api/invites/{invite["id"]}", null, ct), "Not revoked");
+            await OkAsync(client.SendAsync(HttpMethod.Delete, $"invites/{invite["id"]}", null, ct), "Not revoked");
             env.Out.WriteLine($"Revoked {email}'s invite.");
             return 0;
         }
@@ -100,7 +100,7 @@ internal static partial class CliApp
         {
             id = Ask("App id", id, option: "the id: winche apps:delete <id> (see winche apps)");
             Confirm($"Remove the app {id}? Its options stop identifying it to the server.");
-            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Delete, $"api/apps/registered/{Uri.EscapeDataString(id)}", null, ct);
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Delete, $"apps/registered/{Uri.EscapeDataString(id)}", null, ct);
             if (status == HttpStatusCode.NotFound) throw new CliException($"No app {id}. See: winche apps");
             if (status != HttpStatusCode.NoContent) throw new CliException($"Not removed: {ConsoleClient.ErrorText(body, status)}");
             env.Out.WriteLine($"Removed the app {id}.");
@@ -116,11 +116,11 @@ internal static partial class CliApp
             {
                 case "archive":
                     Confirm($"Archive {id}? Its apps and console are refused until it's restored; nothing is deleted.");
-                    await OkAsync(client.SendAsync(HttpMethod.Post, $"api/projects/{id}/archive", new { }, ct), "Not archived");
+                    await OkAsync(client.SendAsync(HttpMethod.Post, $"projects/{id}/archive", new { }, ct), "Not archived");
                     env.Out.WriteLine($"Archived {id}. Bring it back with: winche projects:restore {id}");
                     break;
                 case "restore":
-                    await OkAsync(client.SendAsync(HttpMethod.Post, $"api/projects/{id}/restore", new { }, ct), "Not restored");
+                    await OkAsync(client.SendAsync(HttpMethod.Post, $"projects/{id}/restore", new { }, ct), "Not restored");
                     env.Out.WriteLine($"Restored {id}.");
                     break;
                 default:
@@ -130,7 +130,7 @@ internal static partial class CliApp
                         env.Out.Write($"Deleting {id} removes its database and files for good. Type its id to go ahead: ");
                         if (env.In.ReadLine()?.Trim() != id) throw new CliException("Nothing was deleted.", 1);
                     }
-                    await OkAsync(client.SendAsync(HttpMethod.Delete, $"api/projects/{id}", null, ct), "Not deleted");
+                    await OkAsync(client.SendAsync(HttpMethod.Delete, $"projects/{id}", null, ct), "Not deleted");
                     env.Out.WriteLine($"Deleted {id}, with its database and files.");
                     break;
             }
@@ -148,7 +148,7 @@ internal static partial class CliApp
         public async Task<int> FunctionSecretsAsync(CancellationToken ct)
         {
             var client = await ClientAsync(ct);
-            var body = await OkAsync(client.SendAsync(HttpMethod.Get, "api/functions/secrets", null, ct), "Can't read the function secrets");
+            var body = await OkAsync(client.SendAsync(HttpMethod.Get, "functions/secrets", null, ct), "Can't read the function secrets");
             var list = body["secrets"]?.AsArray() ?? [];
             if (body["available"]?.GetValue<bool>() == false) env.Out.WriteLine("Secrets need the server's master key: none can be set here.");
             if (list.Count == 0) env.Out.WriteLine("No function secrets yet.");
@@ -173,7 +173,7 @@ internal static partial class CliApp
             if (Reference() is { } reference)
             {
                 var c = await ClientAsync(ct);
-                await OkAsync(c.SendAsync(HttpMethod.Put, $"api/functions/secrets/{name}", new { reference }, ct), "Not set");
+                await OkAsync(c.SendAsync(HttpMethod.Put, $"functions/secrets/{name}", new { reference }, ct), "Not set");
                 env.Out.WriteLine($"Set {name}: read from {reference} when functions run. Check it: winche secrets:test {reference}");
                 return 0;
             }
@@ -187,7 +187,7 @@ internal static partial class CliApp
             else value = env.GetVariable("WINCHE_SECRET") ?? (env.Interactive ? SecretValue(name) : throw new CliException("Set WINCHE_SECRET or use --from-file: there's no terminal to ask in.", 2));
             if (value.Length == 0) throw new CliException("The value is empty. To remove the secret: winche functions secrets:remove " + name, 2);
             var client = await ClientAsync(ct);
-            await OkAsync(client.SendAsync(HttpMethod.Put, $"api/functions/secrets/{name}", new { value }, ct), "Not set");
+            await OkAsync(client.SendAsync(HttpMethod.Put, $"functions/secrets/{name}", new { value }, ct), "Not set");
             env.Out.WriteLine($"Set {name}. Functions get it from their next run.");
             return 0;
         }
@@ -197,7 +197,7 @@ internal static partial class CliApp
         {
             CheckSecretName(name);
             var client = await ClientAsync(ct);
-            var (status, body) = await client.SendAsync(HttpMethod.Delete, $"api/functions/secrets/{name}", null, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Delete, $"functions/secrets/{name}", null, ct);
             if (status == HttpStatusCode.NotFound) throw new CliException($"There's no secret {name}. See: winche functions secrets");
             if ((int)status is < 200 or >= 300) throw new CliException($"Not removed: {ConsoleClient.ErrorText(body, status)}");
             env.Out.WriteLine($"Removed {name}. Functions that read it fail until it's set again.");
@@ -213,9 +213,9 @@ internal static partial class CliApp
         /// <c>winche secrets</c> / <c>secrets:set smtp-password | keycloak-sync --provider &lt;name&gt;</c>: the project's
         /// sign-in secrets (your apps' email, a provider's Keycloak sync), set without being shown or saved anywhere else.
         /// </summary>
-        public async Task<int> SecretsAsync(string? name, CancellationToken ct) => await SignInSecretsAsync(await ClientAsync(ct), "api/app-auth", name, ct);
+        public async Task<int> SecretsAsync(string? name, CancellationToken ct) => await SignInSecretsAsync(await ClientAsync(ct), "auth", name, ct);
 
-        /// <summary>The sign-in secrets of a Winche Auth (a project's at api/app-auth, the console accounts' at api/server/auth).</summary>
+        /// <summary>The sign-in secrets of a Winche Auth (a project's at auth, the console accounts' at server/auth).</summary>
         private async Task<int> SignInSecretsAsync(ConsoleClient client, string root, string? name, CancellationToken ct, bool listOnly = false)
         {
             var signin = await OkAsync(client.SendAsync(HttpMethod.Get, $"{root}/settings/signin", null, ct), "Can't read the sign-in settings");
@@ -271,7 +271,7 @@ internal static partial class CliApp
         public async Task<int> SecretSourcesAsync(string verb, string? name, CancellationToken ct)
         {
             var client = await ClientAsync(ct);
-            var info = await OkAsync(client.SendAsync(HttpMethod.Get, "api/secrets/sources", null, ct), "Can't read where secrets come from");
+            var info = await OkAsync(client.SendAsync(HttpMethod.Get, "secrets/sources", null, ct), "Can't read where secrets come from");
             var keys = info["keys"]?.AsArray() ?? [];
             switch (verb)
             {
@@ -289,7 +289,7 @@ internal static partial class CliApp
                 case "test":
                     if (name is null) throw new CliException("Usage: winche secrets:test <reference>, e.g. aws-ssm:/app/key", 2);
                     if (Winche.Secrets.SecretReference.Parse(name, out var problem) is null) throw new CliException(problem!, 2);
-                    var tested = await OkAsync(client.SendAsync(HttpMethod.Post, "api/secrets/test", new { reference = name }, ct), "Not tested");
+                    var tested = await OkAsync(client.SendAsync(HttpMethod.Post, "secrets/test", new { reference = name }, ct), "Not tested");
                     if (tested["ok"]?.GetValue<bool>() == true) { env.Out.WriteLine($"{name}: read just now, it works."); return 0; }
                     throw new CliException($"{name}: {tested["problem"]}");
                 case "key":
@@ -299,7 +299,7 @@ internal static partial class CliApp
                     if (args.Flag("clear"))
                     {
                         Confirm($"Remove the project's {key["title"]}? References read with it stop working.");
-                        await OkAsync(client.SendAsync(HttpMethod.Delete, $"api/secrets/keys/{Uri.EscapeDataString(keyName)}", null, ct), "Not removed");
+                        await OkAsync(client.SendAsync(HttpMethod.Delete, $"secrets/keys/{Uri.EscapeDataString(keyName)}", null, ct), "Not removed");
                         env.Out.WriteLine($"Removed the project's {key["title"]}.");
                         return 0;
                     }
@@ -313,7 +313,7 @@ internal static partial class CliApp
                             : args.Value(option) ?? (f["required"]?.GetValue<bool>() == true ? throw new CliException($"--{option} <{f["title"]}> is needed.", 2) : null);
                         if (!string.IsNullOrWhiteSpace(value)) values[field] = value;
                     }
-                    await OkAsync(client.SendAsync(HttpMethod.Put, $"api/secrets/keys/{Uri.EscapeDataString(keyName)}", new { values }, ct), "Not set");
+                    await OkAsync(client.SendAsync(HttpMethod.Put, $"secrets/keys/{Uri.EscapeDataString(keyName)}", new { values }, ct), "Not set");
                     env.Out.WriteLine($"Set the project's {key["title"]}: references are read with it from now on.");
                     return 0;
                 default:
@@ -336,9 +336,9 @@ internal static partial class CliApp
             if (args.Flag("rotate"))
             {
                 Confirm($"Make a new signing secret for {id}? Receivers need it before they accept its calls.");
-                await OkAsync(client.SendAsync(HttpMethod.Post, $"api/hooks/{Uri.EscapeDataString(id)}/secret/rotate", new { }, ct), "Not rotated");
+                await OkAsync(client.SendAsync(HttpMethod.Post, $"hooks/{Uri.EscapeDataString(id)}/secret/rotate", new { }, ct), "Not rotated");
             }
-            var (status, body) = await client.SendAsync(HttpMethod.Get, $"api/hooks/{Uri.EscapeDataString(id)}/secret", null, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Get, $"hooks/{Uri.EscapeDataString(id)}/secret", null, ct);
             if (status == HttpStatusCode.NotFound) throw new CliException($"No webhook {id} (it gets a secret when first saved).");
             if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
             env.Out.WriteLine(body["secret"]);
@@ -349,8 +349,8 @@ internal static partial class CliApp
 
         private static readonly SettingsFile[] ServerFiles =
         [
-            new("server", "api/server/settings", "the console's sign-in providers, email and the server's own settings"),
-            new("server.auth", "api/server/auth/settings/signin", "how the console's accounts sign in: passwords, two-step, sessions, lockout"),
+            new("server", "server/settings", "the console's sign-in providers, email and the server's own settings"),
+            new("server.auth", "server/auth/settings/signin", "how the console's accounts sign in: passwords, two-step, sessions, lockout"),
         ];
 
         /// <summary><c>winche server settings pull | diff | deploy</c>: the server's settings as files, like a project's.</summary>
@@ -371,12 +371,12 @@ internal static partial class CliApp
         {
             var client = await ClientAsync(ServerConsole(), ct);
             // The console accounts' email and Keycloak sync, like a project's; then the server's own (providers' client secrets).
-            if (name is "smtp-password" or "keycloak-sync") return await SignInSecretsAsync(client, "api/server/auth", name, ct);
-            var settings = await OkAsync(client.SendAsync(HttpMethod.Get, "api/server/settings", null, ct), "Can't read the server's settings");
+            if (name is "smtp-password" or "keycloak-sync") return await SignInSecretsAsync(client, "server/auth", name, ct);
+            var settings = await OkAsync(client.SendAsync(HttpMethod.Get, "server/settings", null, ct), "Can't read the server's settings");
             var secrets = settings["secrets"]?.AsArray() ?? [];
             if (name is null)
             {
-                await SignInSecretsAsync(client, "api/server/auth", null, ct, listOnly: true);
+                await SignInSecretsAsync(client, "server/auth", null, ct, listOnly: true);
                 foreach (var s in secrets) env.Out.WriteLine($"  {s!["name"],-36} {(s["setAt"] is null ? "not set" : $"{(s["reference"] is { } r ? $"from {r}, " : "")}set {s["setAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd} by {s["setBy"]}")}  {s["about"]}");
                 env.Out.WriteLine("Set one: winche server secrets:set <name> (the value from WINCHE_SECRET, or typed; empty removes it)");
                 return 0;
@@ -384,12 +384,12 @@ internal static partial class CliApp
             if (!secrets.Any(s => s?["name"]?.ToString() == name)) throw new CliException($"'{name}' isn't one of the server's secrets. See: winche server secrets", 2);
             if (Reference() is { } reference)
             {
-                await OkAsync(client.SendAsync(HttpMethod.Put, $"api/server/secrets/{Uri.EscapeDataString(name)}", new { reference }, ct), "Not set");
+                await OkAsync(client.SendAsync(HttpMethod.Put, $"server/secrets/{Uri.EscapeDataString(name)}", new { reference }, ct), "Not set");
                 env.Out.WriteLine($"Set {name}: read from {reference}.");
                 return 0;
             }
             var value = env.GetVariable("WINCHE_SECRET") ?? (env.Interactive ? SecretValue(name) : throw new CliException("Set WINCHE_SECRET: there's no terminal to ask in.", 2));
-            await OkAsync(client.SendAsync(HttpMethod.Put, $"api/server/secrets/{Uri.EscapeDataString(name)}", new { value }, ct), "Not set");
+            await OkAsync(client.SendAsync(HttpMethod.Put, $"server/secrets/{Uri.EscapeDataString(name)}", new { value }, ct), "Not set");
             env.Out.WriteLine(value.Length == 0 ? $"Removed {name}." : $"Set {name}.");
             return 0;
         }
@@ -401,7 +401,7 @@ internal static partial class CliApp
         public async Task<int> ServerUsersAsync(string? action, string? email, CancellationToken ct)
         {
             var client = await ClientAsync(ServerConsole(), ct);
-            var users = await client.GetListAsync("api/users", ct);
+            var users = await client.GetListAsync("accounts", ct);
             if (action is null)
             {
                 foreach (var u in users)
@@ -415,15 +415,15 @@ internal static partial class CliApp
             {
                 case "disable":
                     Confirm($"Turn {email}'s account off? They're signed out everywhere and can't sign in until it's turned back on.");
-                    await OkAsync(client.SendAsync(HttpMethod.Put, $"api/users/{id}", new { active = false }, ct), "Not turned off");
+                    await OkAsync(client.SendAsync(HttpMethod.Put, $"accounts/{id}", new { active = false }, ct), "Not turned off");
                     env.Out.WriteLine($"Turned {email}'s account off.");
                     break;
                 case "enable":
-                    await OkAsync(client.SendAsync(HttpMethod.Put, $"api/users/{id}", new { active = true }, ct), "Not turned on");
+                    await OkAsync(client.SendAsync(HttpMethod.Put, $"accounts/{id}", new { active = true }, ct), "Not turned on");
                     env.Out.WriteLine($"Turned {email}'s account back on.");
                     break;
                 case "sign-out":
-                    var ended = await OkAsync(client.SendAsync(HttpMethod.Post, $"api/server/auth/users/{id}/signOut", new { }, ct), "Not signed out");
+                    var ended = await OkAsync(client.SendAsync(HttpMethod.Post, $"server/auth/users/{id}/signOut", new { }, ct), "Not signed out");
                     env.Out.WriteLine($"Signed {email} out everywhere ({ended["sessions"]} session{(ended["sessions"]?.ToString() == "1" ? "" : "s")}).");
                     break;
                 default: throw new CliException("Usage: winche server users[:disable | :enable | :sign-out <email>]", 2);
@@ -439,7 +439,7 @@ internal static partial class CliApp
             var client = await ClientAsync(ct);
             if (action is null)
             {
-                var query = $"api/app-auth/users?limit={args.Value("limit") ?? "50"}" + (args.Value("search") is { } s ? $"&search={Uri.EscapeDataString(s)}" : "");
+                var query = $"auth/users?limit={args.Value("limit") ?? "50"}" + (args.Value("search") is { } s ? $"&search={Uri.EscapeDataString(s)}" : "");
                 var page = await OkAsync(client.SendAsync(HttpMethod.Get, query, null, ct), "Can't list the users");
                 foreach (var u in page["users"]?.AsArray() ?? [])
                     env.Out.WriteLine($"  {u!["uid"],-30} {u["email"]?.ToString() ?? (u["isAnonymous"]?.GetValue<bool>() == true ? "(guest)" : ""),-32} {(u["disabled"]?.GetValue<bool>() == true ? "disabled" : "")}");
@@ -450,18 +450,18 @@ internal static partial class CliApp
             var uid = who;
             if (who.Contains('@'))
             {
-                var found = await OkAsync(client.SendAsync(HttpMethod.Get, $"api/app-auth/users?search={Uri.EscapeDataString(who)}&limit=5", null, ct), "Can't find them");
+                var found = await OkAsync(client.SendAsync(HttpMethod.Get, $"auth/users?search={Uri.EscapeDataString(who)}&limit=5", null, ct), "Can't find them");
                 uid = found["users"]?.AsArray().FirstOrDefault(u => Same(u?["email"], who))?["uid"]?.ToString() ?? throw new CliException($"No user {who}.");
             }
             switch (action)
             {
                 case "disable":
                 case "enable":
-                    await OkAsync(client.SendAsync(HttpMethod.Post, $"api/app-auth/users/{uid}/disabled", new { disabled = action == "disable" }, ct), "Not changed");
+                    await OkAsync(client.SendAsync(HttpMethod.Post, $"auth/users/{uid}/disabled", new { disabled = action == "disable" }, ct), "Not changed");
                     env.Out.WriteLine(action == "disable" ? $"Disabled {who}: signed out, and can't sign in." : $"Enabled {who}.");
                     break;
                 case "sign-out":
-                    await OkAsync(client.SendAsync(HttpMethod.Post, $"api/app-auth/users/{uid}/signOut", new { }, ct), "Not signed out");
+                    await OkAsync(client.SendAsync(HttpMethod.Post, $"auth/users/{uid}/signOut", new { }, ct), "Not signed out");
                     env.Out.WriteLine($"Signed {who} out everywhere.");
                     break;
                 default: throw new CliException("Usage: winche users[:disable | :enable | :sign-out <email or uid>]", 2);
@@ -480,7 +480,7 @@ internal static partial class CliApp
         public async Task<int> StorageMoveAsync(CancellationToken ct)
         {
             var client = await ClientAsync(ct);
-            const string path = "api/settings/storage/location";
+            const string path = "settings/location/files";
             var state = await OkAsync(client.SendAsync(HttpMethod.Get, path, null, ct), "Can't read where the files are");
             var reason = Reason("winche storage:move");
             if (args.Flag("finish") || args.Flag("cancel"))
@@ -548,13 +548,13 @@ internal static partial class CliApp
         public async Task<int> DataMoveAsync(CancellationToken ct)
         {
             var client = await ClientAsync(ct);
-            var info = await OkAsync(client.SendAsync(HttpMethod.Get, "api/data-location", null, ct), "Can't read where the data is");
+            var info = await OkAsync(client.SendAsync(HttpMethod.Get, "settings/location/database", null, ct), "Can't read where the data is");
             if (args.Flag("finish"))
             {
                 if (info["previous"] is null) throw new CliException("There's no move to finish.");
                 var deleteOld = !args.Flag("keep-old");
                 if (deleteOld) Confirm($"Delete the old copy ({info["previous"]!["database"]})?");
-                await OkAsync(client.SendAsync(HttpMethod.Post, "api/data-location/finish", new { deleteOld }, ct), "Not finished");
+                await OkAsync(client.SendAsync(HttpMethod.Post, "settings/location/database/finish", new { deleteOld }, ct), "Not finished");
                 env.Out.WriteLine(deleteOld ? "Finished: the old copy is deleted." : "Finished: the old copy is kept, no longer used.");
                 return 0;
             }
@@ -566,16 +566,16 @@ internal static partial class CliApp
                 env.Out.WriteLine("Move it: winche data:move --db-name <name> [--db-host … --db-user …] (WINCHE_DB_PASSWORD)");
                 return 0;
             }
-            var check = await OkAsync(client.SendAsync(HttpMethod.Post, "api/data-location/check", target, ct), "Can't check that database");
+            var check = await OkAsync(client.SendAsync(HttpMethod.Post, "settings/location/database/check", target, ct), "Can't check that database");
             if (check["ok"]?.GetValue<bool>() != true) throw new CliException($"That database can't be used: {check["problem"]}");
             Confirm($"Move the data there? The project pauses while {check["rowsToCopy"]} rows are copied.");
             var started = DateTimeOffset.UtcNow.AddSeconds(-5);
-            await OkAsync(client.SendAsync(HttpMethod.Post, "api/data-location/move", target, ct), "Not moved", HttpStatusCode.Accepted);
+            await OkAsync(client.SendAsync(HttpMethod.Post, "settings/location/database/move", target, ct), "Not moved", HttpStatusCode.Accepted);
             env.Out.WriteLine("Moving (the project's apps are told to try again meanwhile)…");
             while (true)
             {
                 await Task.Delay(TimeSpan.FromSeconds(1), env.Time, ct);
-                var (status, now) = await client.SendAsync(HttpMethod.Get, "api/data-location", null, ct);
+                var (status, now) = await client.SendAsync(HttpMethod.Get, "settings/location/database", null, ct);
                 if (status == HttpStatusCode.ServiceUnavailable) continue;   // paused while moving
                 if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(now, status));
                 if (now["lastMoveFailed"] is JsonObject f && f["at"]!.GetValue<DateTimeOffset>() > started)
@@ -595,11 +595,11 @@ internal static partial class CliApp
         {
             code = Ask("The code it shows", code, option: "the code: winche login:approve <code>");
             var client = await ClientAsync(ServerConsole(), ct);
-            var (status, found) = await client.SendAsync(HttpMethod.Get, $"api/cli-login/device/{Uri.EscapeDataString(code)}", null, ct);
+            var (status, found) = await client.SendAsync(HttpMethod.Get, $"cli/device/{Uri.EscapeDataString(code)}", null, ct);
             if (status == HttpStatusCode.NotFound) throw new CliException("That code isn't right, has expired or was used: check the one it shows.");
             if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(found, status));
             Confirm($"Allow {found["name"]} ({found["userCode"]}) to use this server as you?");
-            await OkAsync(client.SendAsync(HttpMethod.Post, "api/cli-login/approve", new { userCode = found["userCode"]?.ToString(), port = 0 }, ct), "Not allowed");
+            await OkAsync(client.SendAsync(HttpMethod.Post, "cli/approve", new { userCode = found["userCode"]?.ToString(), port = 0 }, ct), "Not allowed");
             env.Out.WriteLine($"Allowed {found["name"]}: it's signed in as you now.");
             return 0;
         }
@@ -646,7 +646,7 @@ internal static partial class CliApp
 
         private async Task<List<JsonNode>> LogPageAsync(ConsoleClient client, string scope, string query, CancellationToken ct)
         {
-            var (status, body) = await client.SendAsync(HttpMethod.Get, $"api/logs/{scope}?{query.TrimStart('&')}", null, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Get, $"logs/{scope}?{query.TrimStart('&')}", null, ct);
             if (status == HttpStatusCode.NotFound) throw new CliException($"This project has no {(scope == "app" ? "" : scope + " ")}logs to show.");
             if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
             return [.. (body["entries"]?.AsArray() ?? []).Where(e => e is not null).Select(e => e!).OrderBy(e => e["id"]!.GetValue<long>())];

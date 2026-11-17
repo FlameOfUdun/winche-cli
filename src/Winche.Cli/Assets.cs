@@ -67,11 +67,11 @@ internal static partial class CliApp
         /// <summary>The channel's release and its files (path → hash), or null when the channel isn't there yet.</summary>
         private static async Task<(int Release, Dictionary<string, string> Files)?> ChannelFilesAsync(ConsoleClient client, string channel, CancellationToken ct)
         {
-            var (ok, page) = await client.GetAsync("api/assets", "assets", ct);
+            var (ok, page) = await client.GetAsync("assets", "assets", ct);
             if (!ok) throw new CliException(Message(page, "The console refused to list the assets."));
             var at = (page["channels"] as JsonArray ?? []).FirstOrDefault(c => c?["name"]?.GetValue<string>() == channel)?["release"]?.GetValue<int>();
             if (at is not { } number) return null;
-            var (found, release) = await client.GetAsync($"api/assets/releases/{number}", "assets", ct, missingOk: true);
+            var (found, release) = await client.GetAsync($"assets/releases/{number}", "assets", ct, missingOk: true);
             if (!found) throw new CliException(Message(release, $"Release {number} couldn't be read."));
             return (number, (release["files"] as JsonArray ?? []).ToDictionary(f => f!["path"]!.GetValue<string>(), f => f!["hash"]!.GetValue<string>(), StringComparer.Ordinal));
         }
@@ -135,7 +135,7 @@ internal static partial class CliApp
             if (args.Flag("dry-run")) { env.Out.WriteLine("Dry run: nothing published."); return 0; }
 
             // Only the contents the server doesn't have are sent; the rest are named by hash.
-            var (asked, answer) = await client.PostAsync("api/assets/contents/missing", new { hashes = local.Select(e => e.Hash).Distinct() }, "assets", ct);
+            var (asked, answer) = await client.PostAsync("assets/contents/missing", new { hashes = local.Select(e => e.Hash).Distinct() }, "assets", ct);
             if (!asked) { env.Error.WriteLine($"Not published: {Message(answer, "the console refused the contents.")}"); return 1; }
             var missing = (answer["missing"] as JsonArray ?? []).Select(h => h!.GetValue<string>()).ToHashSet();
             var sending = local.Where(e => missing.Remove(e.Hash)).ToList();
@@ -146,12 +146,12 @@ internal static partial class CliApp
                 var uploads = client.Through(slow);
                 foreach (var e in sending)
                 {
-                    var (sent, refusal) = await uploads.PutFileAsync($"api/assets/contents/{e.Hash}", e.File, "assets", ct);
+                    var (sent, refusal) = await uploads.PutFileAsync($"assets/contents/{e.Hash}", e.File, "assets", ct);
                     if (!sent) { env.Error.WriteLine($"Not published: {e.Path}: {Message(refusal, "the console refused it.")}"); return 1; }
                 }
             }
             var note = args.Value("message") ?? $"Published from {Path.GetFileName(folder)}/";
-            var (ok, body) = await client.PostAsync("api/assets/releases", new
+            var (ok, body) = await client.PostAsync("assets/releases", new
             {
                 note, channel,
                 files = local.ToDictionary(e => e.Path, e => new { hash = e.Hash, size = e.Size, mimeType = "" }),
@@ -179,9 +179,9 @@ internal static partial class CliApp
         public async Task<int> AssetsReleasesAsync(CancellationToken ct)
         {
             var client = await ClientAsync(ct);
-            var (ok, body) = await client.GetAsync($"api/assets/releases?limit={args.Value("limit") ?? "30"}", "assets", ct);
+            var (ok, body) = await client.GetAsync($"assets/releases?limit={args.Value("limit") ?? "30"}", "assets", ct);
             if (!ok) throw new CliException(Message(body, "The console refused to list the releases."));
-            var (_, page) = await client.GetAsync("api/assets", "assets", ct);
+            var (_, page) = await client.GetAsync("assets", "assets", ct);
             var channels = (page["channels"] as JsonArray ?? []).GroupBy(c => c!["release"]!.GetValue<int>())
                 .ToDictionary(g => g.Key, g => string.Join(", ", g.Select(c => c!["name"]!.GetValue<string>())));
             var releases = body["releases"] as JsonArray ?? [];
@@ -199,7 +199,7 @@ internal static partial class CliApp
         public async Task<int> AssetsReleaseAsync(string number, CancellationToken ct)
         {
             if (!int.TryParse(number.TrimStart('#'), out var n)) throw new CliException("Usage: winche assets release <number>", 2);
-            var (ok, r) = await (await ClientAsync(ct)).GetAsync($"api/assets/releases/{n}", "assets", ct, missingOk: true);
+            var (ok, r) = await (await ClientAsync(ct)).GetAsync($"assets/releases/{n}", "assets", ct, missingOk: true);
             if (!ok) throw new CliException(Message(r, $"There's no release {n}."));
             env.Out.WriteLine($"Release #{n}: {r["note"]?.GetValue<string>() ?? "no note"} ({r["by"]?.GetValue<string>() ?? "?"}, {DateTimeOffset.Parse(r["at"]!.GetValue<string>()).ToLocalTime():yyyy-MM-dd HH:mm})");
             foreach (var f in r["files"] as JsonArray ?? [])
@@ -209,7 +209,7 @@ internal static partial class CliApp
 
         public async Task<int> AssetsChannelsAsync(CancellationToken ct)
         {
-            var (ok, page) = await (await ClientAsync(ct)).GetAsync("api/assets", "assets", ct);
+            var (ok, page) = await (await ClientAsync(ct)).GetAsync("assets", "assets", ct);
             if (!ok) throw new CliException(Message(page, "The console refused to list the channels."));
             var channels = page["channels"] as JsonArray ?? [];
             if (channels.Count == 0) { env.Out.WriteLine("No channels yet: winche assets deploy makes one (--channel, default production)."); return 0; }
@@ -227,7 +227,7 @@ internal static partial class CliApp
             if (current?.Release == n) { env.Out.WriteLine($"{name} already points at #{n}."); return 0; }
             if (current is { } c)
             {
-                var (found, target) = await client.GetAsync($"api/assets/releases/{n}", "assets", ct, missingOk: true);
+                var (found, target) = await client.GetAsync($"assets/releases/{n}", "assets", ct, missingOk: true);
                 if (!found) throw new CliException(Message(target, $"There's no release {n}."));
                 var files = (target["files"] as JsonArray ?? []).Select(f => new AssetsFolder.Entry(f!["path"]!.GetValue<string>(), "", f["hash"]!.GetValue<string>(), 0)).ToList();
                 env.Out.WriteLine($"{name}: #{c.Release} → #{n}");
@@ -244,7 +244,7 @@ internal static partial class CliApp
                     }
                 }
             }
-            var (ok, body) = await client.PostAsync($"api/assets/channels/{Uri.EscapeDataString(name)}", new { release = n }, "assets", ct);
+            var (ok, body) = await client.PostAsync($"assets/channels/{Uri.EscapeDataString(name)}", new { release = n }, "assets", ct);
             if (!ok) { env.Error.WriteLine($"Not moved: {Message(body, "the console refused it.")}"); return 1; }
             env.Out.WriteLine(current is null ? $"Made {name}, pointing at #{n}." : $"{name} points at #{n} now.");
             return 0;
@@ -252,7 +252,7 @@ internal static partial class CliApp
 
         public async Task<int> AssetsChannelRemoveAsync(string name, CancellationToken ct)
         {
-            var (ok, body) = await (await ClientAsync(ct)).DeleteAsync($"api/assets/channels/{Uri.EscapeDataString(name)}", "assets", ct);
+            var (ok, body) = await (await ClientAsync(ct)).DeleteAsync($"assets/channels/{Uri.EscapeDataString(name)}", "assets", ct);
             if (!ok) { env.Error.WriteLine($"Not removed: {Message(body, "the console refused it.")}"); return 1; }
             env.Out.WriteLine($"Removed {name}. Its releases stay; apps following it get nothing until it's made again.");
             return 0;

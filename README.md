@@ -19,8 +19,8 @@ It needs the .NET 10 runtime. The current version is 2.2.0.
 
 ```sh
 winche setup --url https://api.example.com               # a new server: setup code, your admin account
-winche init --console https://api.example.com/_console   # winche.json, rules files and their test files
-winche use --add prod https://api.example.com/_console   # name a console (and use it here)
+winche init --console https://api.example.com --project clinic   # winche.json, rules files and their test files
+winche use --add prod https://api.example.com/projects/clinic   # name a project (and use it here)
 winche use dev                                           # switch projects; `winche use` lists them
 winche login                                             # browser sign-in, once per server (--reauth: again)
 winche login --no-browser                                # a code to enter in a browser on any device (SSH, servers)
@@ -64,7 +64,7 @@ winche login:add                                         # another account on th
 winche logout                                            # end the sign-in (logout <email>: just that account)
 ```
 
-Options: `-P/--project <alias|id>`, `--console <url>`, `--token <token>`, `--config <path>`, `--only database|storage|assets`,
+Options: `-P/--project <alias|id>`, `--console <server or project address>`, `--token <token>`, `--config <path>`, `--only database|storage|assets`,
 `-m/--message <note>` (deploy), `--force` (deploy unchanged files too), `--skip-tests` (deploy), `-y/--yes`
 (rollback without a prompt), `--stdout` (rules and indexes pull), `--port <n>` (login, emulators).
 Run `winche --help` for the full list.
@@ -80,12 +80,12 @@ export WINCHE_ADMIN_PASSWORD=...                       # or it's asked for (not 
 winche setup --url https://api.example.com --code "$(docker compose logs winche | grep -o 'Setup code: .*' | cut -d' ' -f3)" \
   --email ann@example.com                              # the admin account (signed in here)
 winche 2fa enable                                      # an authenticator app: changing settings needs it by default
-winche projects:create clinic --name Clinic            # a project: its own database, at /p/clinic
-winche use --add clinic https://api.example.com/p/clinic/_console
+winche projects:create clinic --name Clinic            # a project: its own database, at /projects/clinic
+winche use --add clinic https://api.example.com/projects/clinic
 winche products:start database storage authentication
 winche apps:create "Clinic" --id clinic-app --android-package com.example.clinic --apple-bundle-id com.example.clinic
 winche members:add bob@example.com --role Member
-winche init --console https://api.example.com/p/clinic/_console
+winche init --console https://api.example.com --project clinic
 winche settings pull                                   # settings/database.json, storage.json, auth.json, webhooks.json, …
 ```
 
@@ -174,7 +174,8 @@ Found in the working directory or the nearest parent; rule file paths are relati
 
 ```json
 {
-  "console": "https://api.example.com/_console",
+  "server": "https://api.example.com",
+  "project": "clinic",
   "rules": { "database": "database.rules", "storage": "storage.rules" },
   "tests": { "database": "database.rules.test", "storage": "storage.rules.test" }
 }
@@ -199,7 +200,7 @@ Name your consoles in `winche.json` and pick one per checkout:
 
 ```json
 {
-  "projects": { "dev": "http://localhost:5000/_console", "prod": "https://api.example.com/_console" },
+  "projects": { "dev": "http://localhost:5000/projects/clinic", "prod": "https://api.example.com/projects/clinic" },
   "rules": { "database": "database.rules" }
 }
 ```
@@ -207,15 +208,19 @@ Name your consoles in `winche.json` and pick one per checkout:
 `winche use <alias>` picks the project for this checkout (kept on your machine, not in the repo, so each person
 and CI job picks its own); `winche use` lists them (`*` is the picked one); `winche use --add <alias> <url>`,
 `--remove <alias>` and `--clear` edit them. Every command that talks to a console prints `Project: prod (…)` first.
-Which console a command uses: `--console`, else `-P/--project`, else `WINCHE_CONSOLE`, else the picked project,
-else the only project, else `"console"`. Sign-ins are kept per console, so switching doesn't sign you out.
+Which project a command uses: `--console`, else `-P/--project`, else `WINCHE_CONSOLE`, else the picked project,
+else the only project, else `"server"` and `"project"`. Sign-ins are kept per server, so switching projects doesn't
+sign you out.
 
-A Winche Server can run several projects: the default one at the root (console at `/_console`), the others each at
-`/p/<id>` with its console at `/p/<id>/_console`. `winche projects`
-lists the ones on the current console's server that you can use (and, for server admins, the archived ones). Name
-them with `winche use --add <alias> https://api.example.com/p/<id>/_console`; without any aliases in `winche.json`,
-`--project <id>` reaches a project on the same server directly. Each project's console has its own sign-in for the
-CLI (`winche login --project <id>`). For an app, `winche configure --url https://api.example.com --project <id>`.
+A Winche Server runs several projects, each at `/projects/<id>` (its apps' address); its console is at `/console`.
+`winche projects` lists the ones on the server that you can use (and, for server admins, the archived ones). Name them
+with `winche use --add <alias> https://api.example.com/projects/<id>`; without any aliases in `winche.json`,
+`--project <id>` reaches a project on the same server directly. For an app,
+`winche configure --url https://api.example.com --project <id>`.
+
+**From CLI 2.x (Winche Server 2.x):** addresses before Winche Server 3.0 (`…/_console`, `…/p/<id>/_console`) are
+refused, with what to write instead: `"console"` in `winche.json` becomes `"server"` and `"project"`, aliases become
+the projects' addresses, and you sign in again (`winche login`).
 
 ## Indexes and expiry
 
@@ -316,12 +321,12 @@ company sign-in) and allow the CLI. It uses PKCE and a loopback redirect (`http:
 readable by you only.
 
 - **Once per server.** Accounts belong to the server, so one sign-in covers every project on it
-  (`/_console` and `/p/<id>/_console`). Each request runs with your role in that project as it is then.
+  Each request runs with your role in that project as it is then.
 - **A session of your account.** The CLI keeps a refresh token and renews its short-lived access token as needed. It's
   listed among your account's sessions (**Server settings → Authentication → Users**), and it ends with
   `winche logout`, signing out everywhere, a password change, or the account being turned off.
 - **Already signed in,** `winche login` says so. `winche login --reauth` signs in again.
-- **No browser on this machine:** `winche login --no-browser` shows a code to enter at `<server>/_console/cli-login`
+- **No browser on this machine:** `winche login --no-browser` shows a code to enter at `<server>/console/cli-login`
   on any device (RFC 8628's device flow, with PKCE). The code works once, for 10 minutes.
 - **More than one account:** `winche login:add` signs in another beside the one in use, `winche login:list` shows
   them (`*` marks the one in use), and `winche login:use <email>` switches. `winche logout <email>` ends one;
@@ -396,17 +401,19 @@ anyway). CI deploys with a token scoped to `assets` (`winche tokens:create ci --
 ## Emulators
 
 `winche emulators start` runs Winche.Database (REST and the live WebSocket), Winche.Storage, Winche Auth, functions and
-assets (the assets folder published to its channel at start and on every save, `/assets/v1`) in one local process, for your app to talk to. There's no console in it: the console is part
-of Winche Server.
+assets (the assets folder published to its channel at start and on every save, `/assets/v1`) in one local process, for your app to talk to, at the project's address as on Winche Server (`/projects/<id>`, the id
+from `"projectId"`, default `demo`; the root answers too). There's no console in it: the console is part of Winche
+Server.
 
 ```text
 Winche emulator is running — rules from database.rules, storage.rules, reloaded on save
 
-  Database (REST)   http://localhost:9090/documents/v1
-  Database (live)   ws://localhost:9090/documents/v1/ws
-  Storage           http://localhost:9090/files/v1
-  Auth              http://localhost:9090/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)
-  Functions         http://localhost:9090/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)
+  Project           http://localhost:9090/projects/demo   (apps' base URL)
+  Database (REST)   http://localhost:9090/projects/demo/documents/v1
+  Database (live)   ws://localhost:9090/projects/demo/documents/v1/ws
+  Storage           http://localhost:9090/projects/demo/files/v1
+  Auth              http://localhost:9090/projects/demo/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)
+  Functions         http://localhost:9090/projects/demo/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)
   Postgres          temporary (gone when the emulator stops)
 
   Sign in as anyone with an unsigned token:
@@ -457,9 +464,9 @@ when signed in). The Winche VS Code extension
 - A [Winche Server](https://github.com/FlameOfUdun/winche-server) (the console is part of it).
 - The .NET 10 runtime; Deno for `winche functions` and the emulators' functions.
 
-The CLI talks to the console's HTTP API (`/_console/api/...`, or `/p/<id>/_console/api/...` for a project):
-`api/rules`, `api/functions`, `api/settings/database/indexes`, `api/projects`, and `api/cli-login` (approve, token,
-refresh, logout) for signing in.
+The CLI talks to the console's HTTP API, `/console/v1/…`: a project's areas under `/console/v1/projects/<id>/`
+(`rules`, `functions`, `settings/database/indexes`, `assets`, `tokens`, …), the server's at `/console/v1/`
+(`projects`, `accounts`, `invites`, and `cli` (approve, token, refresh, logout) for signing in).
 
 ## Develop
 

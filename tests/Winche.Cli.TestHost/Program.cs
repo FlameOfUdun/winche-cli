@@ -45,7 +45,10 @@ builder.Services.AddWincheConsole(o =>
 var app = builder.Build();
 await app.InitializeWincheDatabaseAsync();
 await app.InitializeWincheStorageAsync();
-app.MapWincheConsole("/_console");
+// As Winche Server lays it out: the console at /console (its API at /console/v1), and this app's project's console API
+// at /console/v1/projects/<id> too.
+app.MapWincheConsole("/console");
+app.MapGroup("/console/v1/projects/{project}").MapWincheConsoleApi();
 app.Run();
 
 public partial class Program { }

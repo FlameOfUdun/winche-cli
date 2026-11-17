@@ -55,16 +55,16 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
             Requests.Add((request.Method, path, request.Headers.Authorization?.ToString(), body));
             (HttpStatusCode, string) answer = path switch
             {
-                "/_console/api/auth/config" => (HttpStatusCode.OK, """{ "provider": "identity" }"""),
+                "/console/v1/session/config" => (HttpStatusCode.OK, """{ "provider": "identity" }"""),
                 // An access token that's already run out, so the next command renews it.
-                "/_console/api/cli-login/token" => (HttpStatusCode.OK, """{ "accessToken": "a.first.jwt", "refreshToken": "r1", "user": "ann@example.com", "expiresAt": "2000-01-01T00:00:00Z" }"""),
-                "/_console/api/cli-login/refresh" => (HttpStatusCode.OK, """{ "accessToken": "a.second.jwt", "refreshToken": "r2", "user": "ann@example.com", "expiresAt": "2099-01-01T00:00:00Z" }"""),
-                "/_console/api/cli-login/logout" => (HttpStatusCode.NoContent, ""),
-                "/_console/api/functions/deploy" => (DeployAnswer, DeployReply),
-                "/_console/api/tokens/current" => (HttpStatusCode.NoContent, ""),
-                "/_console/api/functions/secrets" => (HttpStatusCode.OK, """{ "available": true, "secrets": [{ "name": "MAIL_KEY", "isSet": true, "setAt": "2026-11-12T20:00:00Z", "setBy": "ann@example.com", "usedBy": ["sendReport"] }, { "name": "SA_JSON", "isSet": false, "setAt": null, "setBy": null, "usedBy": [] }] }"""),
-                "/_console/api/functions/secrets/MAIL_KEY" or "/_console/api/functions/secrets/SA_JSON" => (HttpStatusCode.NoContent, ""),
-                "/_console/api/secrets/sources" => (HttpStatusCode.OK, """
+                "/console/v1/cli/token" => (HttpStatusCode.OK, """{ "accessToken": "a.first.jwt", "refreshToken": "r1", "user": "ann@example.com", "expiresAt": "2000-01-01T00:00:00Z" }"""),
+                "/console/v1/cli/refresh" => (HttpStatusCode.OK, """{ "accessToken": "a.second.jwt", "refreshToken": "r2", "user": "ann@example.com", "expiresAt": "2099-01-01T00:00:00Z" }"""),
+                "/console/v1/cli/logout" => (HttpStatusCode.NoContent, ""),
+                "/console/v1/projects/demo/functions/deploy" => (DeployAnswer, DeployReply),
+                "/console/v1/projects/demo/tokens/current" => (HttpStatusCode.NoContent, ""),
+                "/console/v1/projects/demo/functions/secrets" => (HttpStatusCode.OK, """{ "available": true, "secrets": [{ "name": "MAIL_KEY", "isSet": true, "setAt": "2026-11-12T20:00:00Z", "setBy": "ann@example.com", "usedBy": ["sendReport"] }, { "name": "SA_JSON", "isSet": false, "setAt": null, "setBy": null, "usedBy": [] }] }"""),
+                "/console/v1/projects/demo/functions/secrets/MAIL_KEY" or "/console/v1/projects/demo/functions/secrets/SA_JSON" => (HttpStatusCode.NoContent, ""),
+                "/console/v1/projects/demo/secrets/sources" => (HttpStatusCode.OK, """
                     { "available": true, "appCredentials": false,
                       "sources": [{ "name": "aws-sm", "title": "AWS Secrets Manager", "hint": "a secret's ARN or its name", "key": "secrets.source.aws" },
                                   { "name": "aws-ssm", "title": "AWS Parameter Store", "hint": "a parameter's name", "key": "secrets.source.aws" }],
@@ -73,8 +73,8 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
                                             { "name": "secretAccessKey", "title": "Secret access key", "secret": true, "required": true },
                                             { "name": "region", "title": "Region", "secret": false, "required": false }] }] }
                     """),
-                "/_console/api/secrets/test" => (HttpStatusCode.OK, """{ "ok": false, "problem": "AWS Parameter Store has nothing at /app/none.", "code": "not-found" }"""),
-                "/_console/api/secrets/keys/secrets.source.aws" => (HttpStatusCode.NoContent, ""),
+                "/console/v1/projects/demo/secrets/test" => (HttpStatusCode.OK, """{ "ok": false, "problem": "AWS Parameter Store has nothing at /app/none.", "code": "not-found" }"""),
+                "/console/v1/projects/demo/secrets/keys/secrets.source.aws" => (HttpStatusCode.NoContent, ""),
                 _ => (HttpStatusCode.NotFound, "{}"),
             };
             return new HttpResponseMessage(answer.Item1) { Content = new StringContent(answer.Item2, Encoding.UTF8, "application/json") };
@@ -84,7 +84,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     [Fact]
     public async Task Init_makes_a_folder_vs_code_understands_and_deploy_sends_it_through_the_console()
     {
-        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "console": "https://api.example.com/_console" }""");
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "server": "https://api.example.com", "project": "demo" }""");
         var (exit, output, _) = await Run(new Recorder(), null, "functions", "init");
         Assert.Equal(0, exit);
         foreach (var f in new[] { "index.ts", "deno.json", ".winche/functions.ts", ".vscode/settings.json" })
@@ -102,7 +102,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         (exit, output, var err) = await Run(console, v => v == "WINCHE_TOKEN" ? "wct_ci" : null, "functions", "deploy", "-m", "From CI");
         Assert.True(exit == 0, err);
         var deploy = console.Requests.Single();
-        Assert.Equal(("/_console/api/functions/deploy", "Bearer wct_ci"), (deploy.Path, deploy.Auth));
+        Assert.Equal(("/console/v1/projects/demo/functions/deploy", "Bearer wct_ci"), (deploy.Path, deploy.Auth));
         var sent = JsonNode.Parse(deploy.Body!)!;
         Assert.Equal(["console/reports/index.html", "console/reports/logo.png", "deno.json", "index.ts"], sent["files"]!.AsObject().Select(kv => kv.Key).Order());   // not .winche/, .vscode/ or notes
         Assert.Equal("base64:iVBORw==", sent["files"]!["console/reports/logo.png"]!.GetValue<string>());
@@ -125,7 +125,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     [Fact]
     public async Task Login_to_a_console_with_its_own_accounts_is_allowed_in_the_browser_then_deploy_and_logout()
     {
-        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "console": "https://api.example.com/_console", "functions": "functions" }""");
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "server": "https://api.example.com", "project": "demo", "functions": "functions" }""");
         await Run(new Recorder(), null, "functions", "init");
         var console = new FakeConsole();
         var port = FreePort();
@@ -143,28 +143,28 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         Assert.True(exit == 0, err);
         Assert.Contains("as ann@example.com", output);
         var page = new Uri(opened!);
-        Assert.Equal("/_console/cli-login", page.AbsolutePath);
+        Assert.Equal("/console/cli-login", page.AbsolutePath);
         var q = System.Web.HttpUtility.ParseQueryString(page.Query);
         Assert.Equal((port.ToString(), 43), (q["port"], q["challenge"]!.Length));
-        var exchange = JsonNode.Parse(console.Requests.Single(r => r.Path == "/_console/api/cli-login/token").Body!)!;
+        var exchange = JsonNode.Parse(console.Requests.Single(r => r.Path == "/console/v1/cli/token").Body!)!;
         Assert.Equal("the-code", exchange["code"]!.GetValue<string>());
         var verifier = exchange["verifier"]!.GetValue<string>();
         Assert.Equal(q["challenge"], WincheBase64Url.Encode(System.Security.Cryptography.SHA256.HashData(Encoding.ASCII.GetBytes(verifier))));
 
         (exit, _, err) = await Run(console, null, "functions", "deploy");
         Assert.True(exit == 0, err);
-        Assert.Equal("r1", JsonNode.Parse(console.Requests.Single(r => r.Path == "/_console/api/cli-login/refresh").Body!)!["refreshToken"]!.GetValue<string>());
-        Assert.Equal("Bearer a.second.jwt", console.Requests.Last(r => r.Path == "/_console/api/functions/deploy").Auth);
+        Assert.Equal("r1", JsonNode.Parse(console.Requests.Single(r => r.Path == "/console/v1/cli/refresh").Body!)!["refreshToken"]!.GetValue<string>());
+        Assert.Equal("Bearer a.second.jwt", console.Requests.Last(r => r.Path == "/console/v1/projects/demo/functions/deploy").Auth);
 
         (exit, output, _) = await Run(console, null, "logout");
         Assert.Contains("Signed ann@example.com out", output);
-        Assert.Equal("r2", JsonNode.Parse(console.Requests.Single(r => r.Path == "/_console/api/cli-login/logout").Body!)!["refreshToken"]!.GetValue<string>());
+        Assert.Equal("r2", JsonNode.Parse(console.Requests.Single(r => r.Path == "/console/v1/cli/logout").Body!)!["refreshToken"]!.GetValue<string>());
     }
 
     [Fact]
     public async Task Function_secrets_are_listed_set_from_a_variable_or_a_file_and_removed()
     {
-        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "console": "https://api.example.com/_console" }""");
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "server": "https://api.example.com", "project": "demo" }""");
         string? Ci(string v) => v == "WINCHE_TOKEN" ? "wct_ci" : null;
         var console = new FakeConsole();
 
@@ -178,7 +178,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         (exit, output, err) = await Run(console, v => v == "WINCHE_SECRET" ? "k-123" : Ci(v), "functions", "secrets:set", "MAIL_KEY");
         Assert.True(exit == 0, err);
         var put = console.Requests.Last();
-        Assert.Equal((HttpMethod.Put, "/_console/api/functions/secrets/MAIL_KEY", "k-123"), (put.Method, put.Path, JsonNode.Parse(put.Body!)!["value"]!.GetValue<string>()));
+        Assert.Equal((HttpMethod.Put, "/console/v1/projects/demo/functions/secrets/MAIL_KEY", "k-123"), (put.Method, put.Path, JsonNode.Parse(put.Body!)!["value"]!.GetValue<string>()));
         Assert.Contains("Set MAIL_KEY.", output);
 
         File.WriteAllText(Path.Combine(_dir, "sa.json"), """{ "type": "service_account" }""");
@@ -195,7 +195,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
 
         (exit, output, err) = await Run(console, Ci, "functions", "secrets:remove", "MAIL_KEY");
         Assert.True(exit == 0, err);
-        Assert.Equal((HttpMethod.Delete, "/_console/api/functions/secrets/MAIL_KEY"), (console.Requests.Last().Method, console.Requests.Last().Path));
+        Assert.Equal((HttpMethod.Delete, "/console/v1/projects/demo/functions/secrets/MAIL_KEY"), (console.Requests.Last().Method, console.Requests.Last().Path));
         (exit, _, err) = await Run(console, Ci, "functions", "secrets:remove", "NOPE");
         Assert.Equal(1, exit);
         Assert.Contains("There's no secret NOPE", err);
@@ -204,7 +204,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     [Fact]
     public async Task Secrets_can_be_references_to_aws_tested_and_read_with_the_projects_own_key()
     {
-        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "console": "https://api.example.com/_console" }""");
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "server": "https://api.example.com", "project": "demo" }""");
         string? Ci(string v) => v == "WINCHE_TOKEN" ? "wct_ci" : null;
         var console = new FakeConsole();
 
@@ -240,9 +240,9 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     }
 
     [Theory]
-    [InlineData("https://api.example.com/_console", "https://api.example.com/_console/")]
-    [InlineData("https://api.example.com/p/wards/_console/", "https://api.example.com/_console/")]
-    [InlineData("http://localhost:5092/p/a/admin", "http://localhost:5092/admin/")]
+    [InlineData("https://api.example.com/console/v1/", "https://api.example.com/console/v1/")]
+    [InlineData("https://api.example.com/console/v1/projects/wards/", "https://api.example.com/console/v1/")]
+    [InlineData("http://localhost:5092/winche/console/v1/projects/a/", "http://localhost:5092/winche/console/v1/")]
     public void One_sign_in_covers_every_project_on_a_server(string console, string server)
     {
         Assert.Equal(server, CredentialStore.ServerOf(new Uri(console)).ToString());

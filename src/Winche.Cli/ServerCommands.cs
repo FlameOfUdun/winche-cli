@@ -69,7 +69,7 @@ internal static partial class CliApp
             {
                 if (!Uri.TryCreate(url.TrimEnd('/') + "/", UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https"))
                     throw new CliException($"--url {url} isn't an http(s) address.", 2);
-                return u.AbsolutePath.Contains("/_console/", StringComparison.Ordinal) ? CredentialStore.ServerOf(u) : new Uri(u, "_console/");
+                return ConsoleAddress.ServerOf(ConsoleTarget.Parse(url));
             }
             if (Config is not null || args.Value("console") is not null || args.Value("project") is not null || env.GetVariable("WINCHE_CONSOLE") is not null)
                 return CredentialStore.ServerOf(ConsoleUrl());
@@ -98,7 +98,7 @@ internal static partial class CliApp
                 var first = Ask("First name", args.Value("first-name"), "");
                 var last = Ask("Last name", args.Value("last-name"), "");
                 var password = AskSecret("Password", "WINCHE_ADMIN_PASSWORD", confirm: true);
-                var (status, body) = await Anonymous(console).SendAsync(HttpMethod.Post, "api/auth/setup",
+                var (status, body) = await Anonymous(console).SendAsync(HttpMethod.Post, "session/setup",
                     new { setupCode = code, email, firstName = first, lastName = last, password, cli = ConsoleLogin.SessionName }, ct);
                 if (status == HttpStatusCode.Conflict)
                     throw new CliException($"{CredentialStore.Key(console)} is already set up. Sign in: winche login --url {CredentialStore.Key(console)}");
@@ -111,8 +111,8 @@ internal static partial class CliApp
             env.Out.WriteLine();
             env.Out.WriteLine("Next:");
             env.Out.WriteLine("  winche 2fa enable                    # changing settings needs two-step sign-in (unless the server turns that off)");
-            env.Out.WriteLine("  winche projects:create <id> --name …  # a project: its own database, users and files, at /p/<id>");
-            env.Out.WriteLine($"  winche init --console {ConsoleTarget.ForProject(console, "ID").ToString().TrimEnd('/').Replace("/p/ID/", "/p/<id>/")}   # this folder's project");
+            env.Out.WriteLine("  winche projects:create <id> --name …  # a project: its own database, users and files, at /projects/<id>");
+            env.Out.WriteLine($"  winche init --console {ConsoleAddress.Describe(console)} --project <id>   # this folder's project");
             return 0;
         }
 
@@ -135,7 +135,7 @@ internal static partial class CliApp
         public async Task<int> TwoFactorEnableAsync(CancellationToken ct)
         {
             var client = await ClientAsync(ServerConsole(), ct);
-            var (status, started) = await client.SendAsync(HttpMethod.Post, "api/auth/2fa/setup", new { }, ct);
+            var (status, started) = await client.SendAsync(HttpMethod.Post, "session/2fa/setup", new { }, ct);
             if (status != HttpStatusCode.OK) throw new CliException($"Can't start two-step sign-in: {ConsoleClient.ErrorText(started, status)}");
             env.Out.WriteLine("Add this to your authenticator app (most can open the link, or take the key by hand):");
             env.Out.WriteLine($"  {started["authenticatorUri"]}");
@@ -143,7 +143,7 @@ internal static partial class CliApp
             for (var attempt = 1; ; attempt++)
             {
                 var code = Ask("The 6-digit code it shows", args.Value("code"), option: "--code");
-                var (ok, body) = await client.SendAsync(HttpMethod.Post, "api/auth/2fa/enable", new { code }, ct);
+                var (ok, body) = await client.SendAsync(HttpMethod.Post, "session/2fa/enable", new { code }, ct);
                 if (ok == HttpStatusCode.OK)
                 {
                     env.Out.WriteLine("Two-step sign-in is on. Keep these recovery codes somewhere safe (each works once, if you lose the app):");
@@ -164,9 +164,9 @@ internal static partial class CliApp
             id = Ask("Project id (lower-case letters, digits and dashes)", id, option: "the id: winche projects:create <id>");
             var name = Ask("Project name", args.Value("name"), id);
             var client = await ClientAsync(console, ct);
-            var (status, body) = await client.SendAsync(HttpMethod.Post, "api/projects", new { name, id, database = DatabaseTarget() }, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Post, "projects", new { name, id, database = DatabaseTarget() }, ct);
             if (status != HttpStatusCode.OK) throw new CliException($"Making the project failed: {ConsoleClient.ErrorText(body, status)}");
-            var url = new Uri(console, body["consoleUrl"]!.GetValue<string>().TrimEnd('/') + "/").ToString().TrimEnd('/');
+            var url = ConsoleAddress.Describe(ConsoleTarget.ForProject(console, id));
             env.Out.WriteLine($"Made the project {name} ({id}): {url}");
             env.Out.WriteLine($"Use it: winche use --add {id} {url}  (or --project {id})");
             return 0;
@@ -175,7 +175,7 @@ internal static partial class CliApp
         /// <summary><c>winche products</c>: the project's products, started or not.</summary>
         public async Task<int> ProductsAsync(CancellationToken ct)
         {
-            var project = await (await ClientAsync(ct)).GetJsonAsync("api/project", ct);
+            var project = await (await ClientAsync(ct)).GetJsonAsync("project", ct);
             foreach (var p in project["products"]?.AsArray() ?? [])
             {
                 var state = p!["ready"]?.GetValue<bool>() == true ? "started"
@@ -197,7 +197,7 @@ internal static partial class CliApp
             var failed = false;
             foreach (var product in products)
             {
-                var (status, body) = await client.SendAsync(HttpMethod.Post, $"api/project/products/{product}/start", new { }, ct);
+                var (status, body) = await client.SendAsync(HttpMethod.Post, $"project/products/{product}/start", new { }, ct);
                 if (status is not (HttpStatusCode.OK or HttpStatusCode.Accepted)) throw new CliException($"{product}: {ConsoleClient.ErrorText(body, status)}");
                 var shown = 0;
                 while (true)
@@ -213,7 +213,7 @@ internal static partial class CliApp
                     if (state == "done") { env.Out.WriteLine($"{product} is started."); break; }
                     if (state == "failed") { env.Error.WriteLine($"{product}'s setup failed (run winche products:start {product} to try again)."); failed = true; break; }
                     await Task.Delay(TimeSpan.FromMilliseconds(500), env.Time, ct);
-                    (status, body) = await client.SendAsync(HttpMethod.Get, $"api/project/products/{product}/setup", null, ct);
+                    (status, body) = await client.SendAsync(HttpMethod.Get, $"project/products/{product}/setup", null, ct);
                     if (status != HttpStatusCode.OK) throw new CliException($"{product}: {ConsoleClient.ErrorText(body, status)}");
                 }
             }
@@ -225,7 +225,7 @@ internal static partial class CliApp
         /// <summary><c>winche apps</c>: the project's registered apps.</summary>
         public async Task<int> AppsListAsync(CancellationToken ct)
         {
-            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "api/apps/registered", null, ct);
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "apps/registered", null, ct);
             if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
             var apps = body["apps"]?.AsArray() ?? [];
             if (apps.Count == 0) env.Out.WriteLine("No apps registered. Register one: winche apps:create <name> --android-package … --apple-bundle-id …");
@@ -250,11 +250,11 @@ internal static partial class CliApp
                 androidPackage = args.Value("android-package"), appleBundleId = args.Value("apple-bundle-id"), webOrigins = origins,
             };
             var client = await ClientAsync(ct);
-            var (status, body) = await client.SendAsync(HttpMethod.Post, "api/apps/registered", request, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Post, "apps/registered", request, ct);
             if (status != HttpStatusCode.OK) throw new CliException($"Not registered: {ConsoleClient.ErrorText(body, status)}");
             var id = body["id"]!.GetValue<string>();
             var server = ConsoleUrl().GetLeftPart(UriPartial.Authority);
-            var project = Target().Url.AbsolutePath.Trim('/').Split('/') is ["p", var p, ..] ? $" --project {p}" : "";
+            var project = ConsoleAddress.ProjectOf(Target().Url) is { } p ? $" --project {p}" : "";
             env.Out.WriteLine($"Registered the app {name} ({id}).");
             env.Out.WriteLine($"In the app's folder: winche configure --url {server}{project} --app {id}");
             return 0;
@@ -268,7 +268,7 @@ internal static partial class CliApp
         public async Task<int> MembersListAsync(CancellationToken ct)
         {
             var client = await ClientAsync(ct);
-            var (status, body) = await client.SendAsync(HttpMethod.Get, "api/members", null, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Get, "members", null, ct);
             if (status == HttpStatusCode.OK)
             {
                 foreach (var a in body["serverAdmins"]?.AsArray() ?? []) env.Out.WriteLine($"  {a!["email"],-32} Admin (server admin)");
@@ -278,10 +278,10 @@ internal static partial class CliApp
             }
             if (status is not (HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)) throw new CliException(ConsoleClient.ErrorText(body, status));
             // An app's own console (no member list): everyone with an account role (and who's invited).
-            foreach (var u in await client.GetListAsync("api/users", ct))
+            foreach (var u in await client.GetListAsync("accounts", ct))
                 if (u?["role"]?.ToString() is { Length: > 0 } accountRole)
                     env.Out.WriteLine($"  {u["email"],-32} {accountRole}{(accountRole == "Admin" ? " (server admin)" : "")}{(u["active"]?.GetValue<bool>() == false ? " (turned off)" : "")}");
-            foreach (var i in await client.GetListAsync("api/invites", ct))
+            foreach (var i in await client.GetListAsync("invites", ct))
                 if (i?["status"]?.ToString() == "pending") env.Out.WriteLine($"  {i["email"],-32} {i["role"]} (invited)");
             return 0;
         }
@@ -297,7 +297,7 @@ internal static partial class CliApp
             var role = args.Value("role") is { } r ? Roles.FirstOrDefault(x => string.Equals(x, r, StringComparison.OrdinalIgnoreCase))
                 ?? throw new CliException($"--role {r}: Admin, Member or Viewer.", 2) : "Member";
             var client = await ClientAsync(ct);
-            var (status, body) = await client.SendAsync(HttpMethod.Post, "api/members", new { email, role }, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Post, "members", new { email, role }, ct);
             if (status == HttpStatusCode.OK)
             {
                 env.Out.WriteLine($"Added {email} as {role}.");
@@ -308,16 +308,16 @@ internal static partial class CliApp
             if (status is not (HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)) throw new CliException($"Not added: {ConsoleClient.ErrorText(body, status)}");
 
             // An app's own console: the account's own role.
-            var list = await client.GetListAsync("api/users", ct);
+            var list = await client.GetListAsync("accounts", ct);
             var existing = list.FirstOrDefault(u => string.Equals(u?["email"]?.ToString(), email, StringComparison.OrdinalIgnoreCase));
             if (existing is not null)
             {
-                (status, body) = await client.SendAsync(HttpMethod.Put, $"api/users/{existing["id"]}", new { role }, ct);
+                (status, body) = await client.SendAsync(HttpMethod.Put, $"accounts/{existing["id"]}", new { role }, ct);
                 if (status != HttpStatusCode.OK) throw new CliException($"Not changed: {ConsoleClient.ErrorText(body, status)}");
                 env.Out.WriteLine($"{email} is now {role} here.");
                 return 0;
             }
-            (status, body) = await client.SendAsync(HttpMethod.Post, "api/invites", new { email, role, expiresInHours = 168, requireName = false, requireTwoFactor = false }, ct);
+            (status, body) = await client.SendAsync(HttpMethod.Post, "invites", new { email, role, expiresInHours = 168, requireName = false, requireTwoFactor = false }, ct);
             if (status != HttpStatusCode.OK) throw new CliException($"Not invited: {ConsoleClient.ErrorText(body, status)}");
             env.Out.WriteLine($"Invited {email} as {role}; the invite lasts 7 days.");
             Link(body, "They accept it with this link");
@@ -335,7 +335,7 @@ internal static partial class CliApp
 
         public async Task<int> TokensListAsync(CancellationToken ct)
         {
-            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "api/tokens", null, ct);
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "tokens", null, ct);
             if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
             var tokens = body["tokens"]?.AsArray().Where(t => t?["kind"]?.GetValue<string>() == "ci").ToList() ?? [];
             if (tokens.Count == 0) env.Out.WriteLine("No CI tokens. Make one: winche tokens:create <name> --scopes functions,rules,indexes");
@@ -352,7 +352,7 @@ internal static partial class CliApp
             var scopes = (args.Value("scopes") ?? throw new CliException("--scopes: what it may deploy, e.g. --scopes functions,rules,indexes", 2))
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var days = args.Value("days") is { } d ? (int.TryParse(d, out var n) ? n : throw new CliException($"--days {d} isn't a number.", 2)) : 90;
-            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Post, "api/tokens", new { name, scopes, days }, ct);
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Post, "tokens", new { name, scopes, days }, ct);
             if (status != HttpStatusCode.OK) throw new CliException($"Not made: {ConsoleClient.ErrorText(body, status)}");
             if (args.Flag("quiet")) { env.Out.WriteLine(body["secret"]); return 0; }
             env.Out.WriteLine($"Made the CI token {name} ({body["token"]?["id"]}), for {string.Join(", ", scopes)}, for {days} days. It's shown once:");
@@ -365,14 +365,14 @@ internal static partial class CliApp
         public async Task<int> TokensRevokeAsync(string which, CancellationToken ct)
         {
             var client = await ClientAsync(ct);
-            var (status, body) = await client.SendAsync(HttpMethod.Get, "api/tokens", null, ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Get, "tokens", null, ct);
             if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
             var matches = body["tokens"]?.AsArray().Where(t => t?["kind"]?.GetValue<string>() == "ci" &&
                 (t["id"]?.GetValue<string>() == which || t["name"]?.GetValue<string>() == which)).ToList() ?? [];
             if (matches.Count == 0) throw new CliException($"No CI token {which}. See them: winche tokens:list");
             if (matches.Count > 1) throw new CliException($"More than one CI token is called {which}: revoke it by id (winche tokens:list).");
             var id = matches[0]!["id"]!.GetValue<string>();
-            (status, body) = await client.SendAsync(HttpMethod.Delete, $"api/tokens/{id}", null, ct);
+            (status, body) = await client.SendAsync(HttpMethod.Delete, $"tokens/{id}", null, ct);
             if (status != HttpStatusCode.NoContent) throw new CliException($"Not revoked: {ConsoleClient.ErrorText(body, status)}");
             env.Out.WriteLine($"Revoked the CI token {matches[0]!["name"]} ({id}).");
             return 0;
@@ -388,12 +388,12 @@ internal static partial class CliApp
 
         private static readonly SettingsFile[] SettingsFiles =
         [
-            new("database", "api/settings/database", "documents: limits, history, request logs", "indexes", "ttl", "dropUndeclaredIndexes"),
-            new("database.live", "api/settings/database.live", "live connections' limits"),
-            new("storage", "api/settings/storage", "files: size limit, request logs"),
-            new("auth", "api/app-auth/settings/signin", "your apps' sign-in methods, providers and emails (the SMTP password isn't in it)"),
-            new("auth.providers", "api/app-auth/settings/providers", "trusted token issuers"),
-            new("webhooks", "api/hooks", "each product's webhooks (their signing secrets stay on the server)"),
+            new("database", "settings/database", "documents: limits, history, request logs", "indexes", "ttl", "dropUndeclaredIndexes"),
+            new("database.live", "settings/database.live", "live connections' limits"),
+            new("storage", "settings/storage", "files: size limit, request logs"),
+            new("auth", "auth/settings/signin", "your apps' sign-in methods, providers and emails (the SMTP password isn't in it)"),
+            new("auth.providers", "auth/settings/providers", "trusted token issuers"),
+            new("webhooks", "hooks", "each product's webhooks (their signing secrets stay on the server)"),
         ];
 
         private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };

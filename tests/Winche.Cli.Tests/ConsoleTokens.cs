@@ -19,16 +19,16 @@ public static class ConsoleTokens
         var admin = await SignedInAsync(app, AdminEmail, setup: true);
         if (email != AdminEmail)
         {
-            var made = await admin.PostAsJsonAsync("/_console/api/users", new { email, role, password = Password });
+            var made = await admin.PostAsJsonAsync("/console/v1/accounts", new { email, role, password = Password });
             if (!made.IsSuccessStatusCode && made.StatusCode != System.Net.HttpStatusCode.Conflict)
                 throw new InvalidOperationException($"Couldn't make {email}: {await made.Content.ReadAsStringAsync()}");
         }
         var who = email == AdminEmail ? admin : await SignedInAsync(app, email, setup: false);
         var (challenge, verifier) = Pkce();
-        var approved = await who.PostAsJsonAsync("/_console/api/cli-login/approve", new { challenge, port = 45678, state = "s", name = "tests" });
+        var approved = await who.PostAsJsonAsync("/console/v1/cli/approve", new { challenge, port = 45678, state = "s", name = "tests" });
         var redirect = JsonDocument.Parse(await approved.EnsureSuccessStatusCode().Content.ReadAsStringAsync()).RootElement.GetProperty("redirect").GetString()!;
         var code = System.Web.HttpUtility.ParseQueryString(new Uri(redirect).Query)["code"];
-        var token = await app.CreateClient().PostAsJsonAsync("/_console/api/cli-login/token", new { code, verifier });
+        var token = await app.CreateClient().PostAsJsonAsync("/console/v1/cli/token", new { code, verifier });
         return JsonDocument.Parse(await token.EnsureSuccessStatusCode().Content.ReadAsStringAsync()).RootElement.GetProperty("accessToken").GetString()!;
     }
 
@@ -36,8 +36,8 @@ public static class ConsoleTokens
     public static async Task<HttpClient> SignedInAsync(ConsoleAppFactory app, string email, bool setup)
     {
         var client = app.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
-        if (setup) await client.PostAsJsonAsync("/_console/api/auth/setup", new { email, password = Password, firstName = "Ada", lastName = "Admin" });   // 409 once made
-        var login = await client.PostAsJsonAsync("/_console/api/auth/login", new { email, password = Password });
+        if (setup) await client.PostAsJsonAsync("/console/v1/session/setup", new { email, password = Password, firstName = "Ada", lastName = "Admin" });   // 409 once made
+        var login = await client.PostAsJsonAsync("/console/v1/session/login", new { email, password = Password });
         login.EnsureSuccessStatusCode();
         return client;
     }

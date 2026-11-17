@@ -9,7 +9,7 @@ namespace Winche.Cli.Tests;
 [Collection("postgres")]
 public sealed class AssetsCliTests(PostgresFixture fx) : IDisposable
 {
-    private const string ConsoleUrl = "http://localhost/_console";
+    private const string ConsoleUrl = "http://localhost/projects/demo";
     private readonly string _dir = Directory.CreateTempSubdirectory("winche-cli-assets-").FullName;
     private readonly string _configDir = Directory.CreateTempSubdirectory("winche-cli-config-").FullName;
     private readonly string _channel = $"c{Guid.NewGuid():N}"[..12];   // the database is shared between tests
@@ -56,7 +56,7 @@ public sealed class AssetsCliTests(PostgresFixture fx) : IDisposable
     [Fact]
     public async Task Init_deploy_diff_and_rolling_back_a_channel()
     {
-        Write("winche.json", $$"""{ "console": "{{ConsoleUrl}}", "rules": {} }""");
+        Write("winche.json", $$"""{ "server": "http://localhost", "project": "demo", "rules": {} }""");
         var init = await Admin("assets", "init");
         Assert.True(init.Exit == 0, init.All);
         Assert.True(File.Exists(Path.Combine(_dir, "assets", "translations", "en.json")));
