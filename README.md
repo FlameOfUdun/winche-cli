@@ -13,7 +13,7 @@ dotnet tool install -g Winche.Cli     # then: winche --help
 dotnet tool update -g Winche.Cli      # later, for a new version
 ```
 
-It needs the .NET 10 runtime. The current version is 2.0.0.
+It needs the .NET 10 runtime. The current version is 2.1.0.
 
 ## Commands
 
@@ -43,7 +43,8 @@ winche settings pull                                     # the project's setting
 winche tokens:create gitlab-main --scopes rules,indexes  # a CI token (also tokens:list, tokens:revoke)
 winche logs -f                                           # the project's logs, then new ones as they come
 winche users                                             # your apps' users (users:disable, users:enable, users:sign-out)
-winche secrets:set smtp-password                         # a secret, typed unseen or from WINCHE_SECRET
+winche secrets:set smtp-password                         # a secret, typed unseen or from WINCHE_SECRET (or --ref aws-ssm:/app/key)
+winche secrets:sources                                   # where secrets can be read from (AWS), the project's own key (secrets:key aws, secrets:test)
 winche storage:move --bucket files --region eu-west-1 …  # move the project's files to a bucket (data:move: its database)
 winche login:approve BCDF-GHJK                           # allow a CLI waiting with --no-browser, as you
 winche server settings pull                              # the server's own settings as files (server admins)
@@ -164,7 +165,7 @@ final app = await WincheFlutter.initializeApp(options: DefaultWincheOptions.curr
 if (kDebugMode) app.useEmulator();   // winche emulators start
 ```
 
-The console's Project settings → Your apps shows the same file, to download. The emulators' project id is `projectId` in
+The console's Project settings → General (Add app) shows the same file, to download. The emulators' project id is `projectId` in
 `winche.json` (default `demo`).
 
 ## `winche.json`
@@ -444,12 +445,15 @@ Needs Docker (unless `--pg`) and the .NET 10 runtime with ASP.NET Core.
 errors and warnings as you type (the same checks as `rules validate`), test results on each `test` block and
 on failing lines (re-run as you edit either file), formatting (left alone when the file has comments, which
 the console doesn't keep), and the document fields the console samples for a match pattern (`winche/fields`,
-when signed in). The [Winche VS Code extension](https://github.com/FlameOfUdun/winche-vscode) starts it.
+when signed in). The Winche VS Code extension
+([Marketplace](https://marketplace.visualstudio.com/items?itemName=FlameOfUdun.winche),
+[source](https://github.com/FlameOfUdun/winche-vscode)) starts it, and turns Deno on for the functions folder named in
+`winche.json`, so `@winche/functions` resolves in the editor.
 
 ## Requirements
 
 - A [Winche Server](https://github.com/FlameOfUdun/winche-server) (the console is part of it).
-- .NET 10 SDK.
+- The .NET 10 runtime; Deno for `winche functions` and the emulators' functions.
 
 The CLI talks to the console's HTTP API (`/_console/api/...`, or `/p/<id>/_console/api/...` for a project):
 `api/rules`, `api/functions`, `api/settings/database/indexes`, `api/projects`, and `api/cli-login` (approve, token,
