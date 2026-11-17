@@ -13,7 +13,7 @@ dotnet tool install -g Winche.Cli     # then: winche --help
 dotnet tool update -g Winche.Cli      # later, for a new version
 ```
 
-It needs the .NET 10 runtime. The current version is 2.1.0.
+It needs the .NET 10 runtime. The current version is 2.2.0.
 
 ## Commands
 
