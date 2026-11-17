@@ -430,6 +430,8 @@ Winche emulator is running — rules from database.rules, storage.rules, reloade
 - **Functions** come from the functions folder (`"functions"` in `winche.json`, default `functions/`) and are
   reloaded on save; a version that doesn't bundle is reported and the last good one keeps running. They run on Deno:
   `WINCHE_DENO`, else the one on `PATH`, else a pinned release downloaded once into `~/.config/winche/deno`.
+  Their memory and instances (`memory`, `minInstances`, `maxInstances`, `reservedInstances`, `isolate`) apply as on a
+  server: an instance over its memory, or a process out of memory, is reported in the output.
 - **Auth:** Winche Auth runs too — sign up, sign in and guests at `/auth/v1` (passwords of 6+ characters), Hand-made tokens from `winche emulators token <uid>` keep working beside real ones. Emails (verify, reset, email change) aren't sent: their links are printed in the emulator's output. Google and Apple sign-in take fake ID tokens: `winche emulators idtoken google ann@example.com`.
 - `--port` (default 9090) and `--host` (default `localhost`; `0.0.0.0` to reach it from a phone or another machine).
 
