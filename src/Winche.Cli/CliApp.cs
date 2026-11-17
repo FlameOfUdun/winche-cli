@@ -62,7 +62,8 @@ internal static partial class CliApp
           users, users:disable | users:enable | users:sign-out <email or uid>
                                Your apps' users (--search, --limit)
           storage:move         Where files are kept; --bucket/--region/--service-url/--access-key (WINCHE_SECRET: the
-                               secret key) or --to server copies them there, then switches; --finish, --cancel
+                               secret key, or --ref aws-ssm:/app/bucket-key) or --to server copies them there, then
+                               switches; --finish, --cancel
           data:move            Where the project's database is; --db-name/--db-host/… moves it; --finish [--keep-old]
           logs                 The project's logs (--product database|storage, --level, --search, --since 1h,
                                --limit; -f/--follow keeps printing new ones)

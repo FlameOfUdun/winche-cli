@@ -503,7 +503,7 @@ internal static partial class CliApp
             }
             if (state["move"] is JsonObject { } open && open["phase"]?.ToString() != "switched")
                 throw new CliException($"A move to {open["toLabel"]} is already {open["phase"]}: wait, or winche storage:move --cancel.");
-            object location; string? secret = null;
+            object location; string? secret = null; var secretRef = Reference();
             if (to is "server" or "code") location = new { kind = "code" };
             else
             {
@@ -517,10 +517,10 @@ internal static partial class CliApp
                         forcePathStyle = args.Flag("path-style"),
                     },
                 };
-                secret = SecretValue("The bucket's secret key");
+                if (secretRef is null) secret = SecretValue("The bucket's secret key");
             }
             Confirm("Copy every file there, then switch to it?");
-            await OkAsync(client.SendAsync(HttpMethod.Post, $"{path}/move", new { location, secretKey = secret, reason }, ct), "Not moved");
+            await OkAsync(client.SendAsync(HttpMethod.Post, $"{path}/move", new { location, secretKey = secret, secretKeyReference = secretRef, reason }, ct), "Not moved");
             env.Out.WriteLine("Copying the files…");
             while (true)
             {
