@@ -549,8 +549,9 @@ internal static partial class CliApp
         /// <summary>The projects on the console's Winche Server that this account may use (and the archived, for server admins).</summary>
         public async Task<int> ProjectsAsync(CancellationToken ct)
         {
-            var body = await (await ClientAsync(ct)).GetJsonAsync("projects", ct);
-            var console = ConsoleUrl();
+            // The server's list: --url, this project's server, or the one server you're signed in to.
+            var console = ServerConsole();
+            var body = await (await ClientAsync(console, ct)).GetJsonAsync("projects", ct);
             if (body["available"]?.GetValue<bool>() != true)
             {
                 env.Out.WriteLine($"{ConsoleAddress.Describe(console)} runs one project: {body["current"]}.");
@@ -568,7 +569,7 @@ internal static partial class CliApp
                 env.Out.WriteLine("Archived:");
                 foreach (var a in archived) env.Out.WriteLine($"  {a!["id"],-24} {a["name"]}");
             }
-            env.Out.WriteLine("Use one: --project <id> (or winche use --add <alias> <its console>).");
+            env.Out.WriteLine("Use one: --project <id> (or winche use --add <alias> <its address>).");
             return 0;
         }
 
