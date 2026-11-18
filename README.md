@@ -359,7 +359,7 @@ it's built. `winche functions deploy` runs each page's build and deploys its out
 deploys the last output; `winche pages build` only builds). With `winche emulators start`, run the page's build in
 watch mode: the emulator redeploys when its output changes.
 
-In a page, `import { documents } from "@winche/admin"` acts as the person who opened it (their role in the project
+In a page, `import { documents } from "@winche-technologies/winche-admin"` acts as the person who opened it (their role in the project
 limits it). The page brings the SDK like any dependency (bundled with it; with Vite, `base: "./"`, since a page's files
 are addressed relative to it); the console gives it only the channel the SDK finds by itself.
 
@@ -475,7 +475,7 @@ the console doesn't keep), and the document fields the console samples for a mat
 when signed in). The Winche VS Code extension
 ([Marketplace](https://marketplace.visualstudio.com/items?itemName=FlameOfUdun.winche),
 [source](https://github.com/FlameOfUdun/winche-vscode)) starts it, and turns Deno on for the functions folder named in
-`winche.json`, so `@winche/functions` resolves in the editor.
+`winche.json`, so `@winche-technologies/winche-functions` resolves in the editor.
 
 ## Requirements
 

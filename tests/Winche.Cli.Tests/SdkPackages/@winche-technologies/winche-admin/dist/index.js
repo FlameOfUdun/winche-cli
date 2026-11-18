@@ -1417,9 +1417,9 @@ var ambient = (op, args) => {
   if (run?.call) return run.call(op, args);
   const page = g[Symbol.for("winche.page")];
   if (typeof page === "function") return page(op, args, PROTOCOL);
-  return Promise.reject(new WincheError("failed-precondition", run ? "This test gave no server: use withServer(...) from @winche/functions/testing to reach one." : "@winche/admin isn't signed in here. Functions and console pages are signed in already (call it while a function runs, not at a module's top level); anywhere else use initializeAdmin({ server, project, key })."));
+  return Promise.reject(new WincheError("failed-precondition", run ? "This test gave no server: use withServer(...) from @winche-technologies/winche-functions/testing to reach one." : "@winche-technologies/winche-admin isn't signed in here. Functions and console pages are signed in already (call it while a function runs, not at a module's top level); anywhere else use initializeAdmin({ server, project, key })."));
 };
-var mismatch = (server) => new WincheError("failed-precondition", `This @winche/admin speaks protocol ${PROTOCOL}; the server speaks ${server}: use the @winche/admin version made for it.`);
+var mismatch = (server) => new WincheError("failed-precondition", `This @winche-technologies/winche-admin speaks protocol ${PROTOCOL}; the server speaks ${server}: use the @winche-technologies/winche-admin version made for it.`);
 var signedIn = new Admin(ambient);
 var documents = signedIn.documents;
 var files = signedIn.files;

@@ -392,7 +392,7 @@ internal static partial class CliApp
             if (args.Flag("quiet")) { env.Out.WriteLine(body["secret"]); return 0; }
             env.Out.WriteLine($"A key for {account["name"]}, for {days} days. It's shown once:");
             env.Out.WriteLine(body["secret"]);
-            env.Out.WriteLine("Put it in the secrets of what uses it: WINCHE_TOKEN for the CLI, or initializeAdmin({ key }) for @winche/admin.");
+            env.Out.WriteLine("Put it in the secrets of what uses it: WINCHE_TOKEN for the CLI, or initializeAdmin({ key }) for @winche-technologies/winche-admin.");
             return 0;
         }
 

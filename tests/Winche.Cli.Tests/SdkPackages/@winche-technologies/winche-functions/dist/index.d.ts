@@ -1,7 +1,7 @@
 /**
- * @winche/functions — write Winche functions.
+ * @winche-technologies/winche-functions — write Winche functions.
  *
- *   import { onDocument, callable, schedule, secrets } from "@winche/functions";
+ *   import { onDocument, callable, schedule, secrets } from "@winche-technologies/winche-functions";
  *   import { documents, FieldValue } from "@winche-technologies/winche-admin";
  *
  *   export const onVisit = onDocument.created("patients/{patientId}/visits/{visitId}", async (e, ctx) => {
@@ -14,7 +14,7 @@
  *   export const nightly = schedule("0 2 * * *", async (_e, ctx) => ctx.log("Nightly clean-up", mailKey.isSet()), { secrets: [mailKey] });
  *
  * Functions run on the Winche server in a sandbox: they can use the network (fetch) but not its files or settings.
- * Their data comes from @winche/admin, which acts with the server's own rights inside them (access rules don't apply,
+ * Their data comes from @winche-technologies/winche-admin, which acts with the server's own rights inside them (access rules don't apply,
  * unless `as(ctx.caller)`).
  */
 import { type Call, type Json, type DocumentData, DocumentSnapshot, FileSnapshot, UserSnapshot } from "@winche-technologies/winche-admin";
@@ -72,11 +72,11 @@ export interface Caller {
 }
 /** A console role in the project: who may see a page. */
 export type ConsoleRole = "viewer" | "member" | "admin";
-/** The call: what a function gets beside its data or event. Its data comes from @winche/admin. */
+/** The call: what a function gets beside its data or event. Its data comes from @winche-technologies/winche-admin. */
 export interface Context {
     /** This function's name (its export name). */
     name: string;
-    /** For callables: who called (null when signed out). Act as them with `as(ctx.caller)` from @winche/admin. */
+    /** For callables: who called (null when signed out). Act as them with `as(ctx.caller)` from @winche-technologies/winche-admin. */
     caller: Caller | null;
     /** Writes to the server's logs (Logs → functions); console.log does too. */
     log(...args: unknown[]): void;
@@ -286,7 +286,7 @@ export interface PageOptions {
     files: string;
     /** A Tabler icon name (e.g. "chart-bar"); the default is a page icon. */
     icon?: string;
-    /** Who sees it (default viewer). What it may do is their role's (@winche/admin in the page acts as them). */
+    /** Who sees it (default viewer). What it may do is their role's (@winche-technologies/winche-admin in the page acts as them). */
     minRole?: ConsoleRole;
     /** Where it goes in the sidebar, lowest first (default 0, then by title). */
     order?: number;
@@ -380,7 +380,7 @@ export declare const schedule: (cron: string, handler: Handler<ScheduleEvent>, o
 export declare const callable: <D = Json, R = Json>(handler: (data: D, ctx: Context) => R | Promise<R>, options?: FunctionOptions) => WincheFunction<D, R>;
 /**
  * A page in the console made of your own files: `pages({ title: "Reports", files: "console/reports" })` shows
- * console/reports/index.html in a sandboxed frame. In it, @winche/admin acts as the person who opened it.
+ * console/reports/index.html in a sandboxed frame. In it, @winche-technologies/winche-admin acts as the person who opened it.
  */
 export declare const pages: (options: PageOptions) => WincheFunction<never, null>;
 export interface HttpOptions extends FunctionOptions {

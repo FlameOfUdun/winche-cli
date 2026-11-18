@@ -1,9 +1,9 @@
 // @ts-self-types="./index.d.ts"
 // SPDX-License-Identifier: MIT
 /**
- * @winche/functions — write Winche functions.
+ * @winche-technologies/winche-functions — write Winche functions.
  *
- *   import { onDocument, callable, schedule, secrets } from "@winche/functions";
+ *   import { onDocument, callable, schedule, secrets } from "@winche-technologies/winche-functions";
  *   import { documents, FieldValue } from "@winche-technologies/winche-admin";
  *
  *   export const onVisit = onDocument.created("patients/{patientId}/visits/{visitId}", async (e, ctx) => {
@@ -16,7 +16,7 @@
  *   export const nightly = schedule("0 2 * * *", async (_e, ctx) => ctx.log("Nightly clean-up", mailKey.isSet()), { secrets: [mailKey] });
  *
  * Functions run on the Winche server in a sandbox: they can use the network (fetch) but not its files or settings.
- * Their data comes from @winche/admin, which acts with the server's own rights inside them (access rules don't apply,
+ * Their data comes from @winche-technologies/winche-admin, which acts with the server's own rights inside them (access rules don't apply,
  * unless `as(ctx.caller)`).
  */
 import { WincheError, DocumentReference, DocumentSnapshot, ChildReference, FileSnapshot, UserReference, UserSnapshot, decodeFields, encodeValue, fileData, userData, } from "@winche-technologies/winche-admin";
@@ -158,7 +158,7 @@ const define = (trigger, run, options = {}) => ({
 /**
  * Before-functions run before a write is saved, inside it: the write waits for them, so keep them quick. They can
  * refuse it (throw HttpsError: its message reaches the caller) or change it (return the changes). In them
- * @winche/admin only reads. Side effects (emails, other writes) belong in the onCreated… triggers.
+ * @winche-technologies/winche-admin only reads. Side effects (emails, other writes) belong in the onCreated… triggers.
  */
 const before = (on, events, path, handler, options) => define({ kind: "before", on, events, path }, handler, options);
 /** Document triggers. Paths are patterns: {name} matches one part (in event.params), {rest=**} the rest. */
@@ -202,7 +202,7 @@ export const schedule = (cron, handler, options) => define({ kind: "schedule", c
 export const callable = (handler, options) => define({ kind: "callable" }, handler, options);
 /**
  * A page in the console made of your own files: `pages({ title: "Reports", files: "console/reports" })` shows
- * console/reports/index.html in a sandboxed frame. In it, @winche/admin acts as the person who opened it.
+ * console/reports/index.html in a sandboxed frame. In it, @winche-technologies/winche-admin acts as the person who opened it.
  */
 export const pages = (options) => define({ kind: "consolePage" }, () => null, options);
 /**

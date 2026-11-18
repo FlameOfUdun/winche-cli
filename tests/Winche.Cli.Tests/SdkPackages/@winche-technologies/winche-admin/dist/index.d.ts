@@ -1,7 +1,7 @@
 /**
- * @winche/admin — a Winche project's data: documents, files, the app's users, assets, and calling functions.
+ * @winche-technologies/winche-admin — a Winche project's data: documents, files, the app's users, assets, and calling functions.
  *
- *   import { documents, files, FieldValue } from "@winche/admin";
+ *   import { documents, files, FieldValue } from "@winche-technologies/winche-admin";
  *
  *   await documents.doc("patients/p1").update({ visits: FieldValue.increment(1) });
  *   const report = await files.child("reports/a.pdf").getData();

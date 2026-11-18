@@ -136,8 +136,8 @@ internal static class FunctionsFolder
     }
 
     public const string Example = """
-        import { callable, HttpsError } from "@winche/functions";
-        import { documents } from "@winche/admin";
+        import { callable, HttpsError } from "@winche-technologies/winche-functions";
+        import { documents } from "@winche-technologies/winche-admin";
 
         // Called by apps: functions.call("hello", { name: "Ann" })
         export const hello = callable(async (data: { name?: string }, ctx) => {
@@ -146,7 +146,7 @@ internal static class FunctionsFolder
           return { greeting: `Hello ${data.name}`, by: ctx.caller?.uid ?? null };
         });
 
-        // When a document is created: {name} parts of the path are in e.params (onDocument from @winche/functions)
+        // When a document is created: {name} parts of the path are in e.params (onDocument from @winche-technologies/winche-functions)
         // export const onVisit = onDocument.created("patients/{patientId}/visits/{visitId}", async (e, ctx) => {
         //   await documents.doc(`patients/${e.params.patientId}`).update({ lastVisit: new Date() });
         // });
@@ -154,7 +154,7 @@ internal static class FunctionsFolder
         """;
 
     /// <summary>
-    /// Makes the folder: an example, deno.json (the SDKs, @winche/functions and @winche/admin, from npm), VS Code's Deno
+    /// Makes the folder: an example, deno.json (the SDKs, @winche-technologies/winche-functions and @winche-technologies/winche-admin, from npm), VS Code's Deno
     /// settings. Keeps what's there.
     /// </summary>
     public static IReadOnlyList<string> Init(string dir)
