@@ -89,8 +89,8 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         Assert.Equal(0, exit);
         foreach (var f in new[] { "index.ts", "deno.json", ".vscode/settings.json" })
             Assert.True(File.Exists(Path.Combine(_dir, "functions", f)), f);
-        Assert.Contains("\"@winche/functions\": \"npm:@winche-technologies/functions@^3\"", File.ReadAllText(Path.Combine(_dir, "functions", "deno.json")));
-        Assert.Contains("\"@winche/admin\": \"npm:@winche-technologies/admin@^3\"", File.ReadAllText(Path.Combine(_dir, "functions", "deno.json")));
+        Assert.Contains("\"@winche/functions\": \"npm:@winche-technologies/winche-functions@^3\"", File.ReadAllText(Path.Combine(_dir, "functions", "deno.json")));
+        Assert.Contains("\"@winche/admin\": \"npm:@winche-technologies/winche-admin@^3\"", File.ReadAllText(Path.Combine(_dir, "functions", "deno.json")));
         Assert.False(Directory.Exists(Path.Combine(_dir, "functions", ".winche")));   // the SDKs are npm packages, not files here
         Assert.Equal("functions", JsonNode.Parse(File.ReadAllText(Path.Combine(_dir, "winche.json")))!["functions"]!.GetValue<string>());
         Assert.Contains("added \"functions\"", output);
@@ -311,7 +311,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
             File.Copy(file, dest, overwrite: true);
         }
         File.WriteAllText(Path.Combine(functions, "deno.json"), """
-            { "imports": { "@winche/functions": "./vendor/functions/dist/index.js", "@winche/admin": "./vendor/admin/dist/index.js", "@winche-technologies/admin": "./vendor/admin/dist/index.js" } }
+            { "imports": { "@winche/functions": "./vendor/functions/dist/index.js", "@winche/admin": "./vendor/admin/dist/index.js", "@winche-technologies/winche-admin": "./vendor/admin/dist/index.js" } }
             """);
     }
 

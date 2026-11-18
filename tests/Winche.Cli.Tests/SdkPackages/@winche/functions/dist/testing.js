@@ -10,7 +10,7 @@
  * Secrets, resources and @winche/admin read what the innermost `with…` gives while its callback runs (one at a time:
  * don't run tests in parallel that give different ones).
  */
-import { initializeAdmin } from "@winche-technologies/admin";
+import { initializeAdmin } from "@winche-technologies/winche-admin";
 const stack = [];
 globalThis[Symbol.for("winche.test")] = () => (stack.length ? Object.assign({}, ...stack) : undefined);
 async function within(run, fn) {

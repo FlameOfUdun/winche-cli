@@ -1,7 +1,7 @@
 {
-  "name": "@winche-technologies/functions",
+  "name": "@winche-technologies/winche-functions",
   "version": "3.0.0",
-  "description": "Write Winche functions: triggers, callables, HTTP functions, schedules, console pages, secrets and resources. Data comes from @winche-technologies/admin.",
+  "description": "Write Winche functions: triggers, callables, HTTP functions, schedules, console pages, secrets and resources. Data comes from @winche-technologies/winche-admin.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -27,11 +27,11 @@
     "url": "git+https://github.com/FlameOfUdun/winche-functions-typescript-sdk.git"
   },
   "peerDependencies": {
-    "@winche-technologies/admin": "^3.0.0"
+    "@winche-technologies/winche-admin": "^3.0.0"
   },
   "devDependencies": {
-    "typescript": "5.8.3",
-    "@winche-technologies/admin": "file:../winche-admin-typescript-sdk"
+    "@winche-technologies/winche-admin": "file:../winche-admin-typescript-sdk",
+    "typescript": "5.8.3"
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && node scripts/self-types.mjs",

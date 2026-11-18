@@ -4,7 +4,7 @@
  * @winche/functions — write Winche functions.
  *
  *   import { onDocument, callable, schedule, secrets } from "@winche/functions";
- *   import { documents, FieldValue } from "@winche-technologies/admin";
+ *   import { documents, FieldValue } from "@winche-technologies/winche-admin";
  *
  *   export const onVisit = onDocument.created("patients/{patientId}/visits/{visitId}", async (e, ctx) => {
  *     await documents.doc(`patients/${e.params.patientId}`).update({ lastVisit: e.data.get("at"), visits: FieldValue.increment(1) });
@@ -19,7 +19,7 @@
  * Their data comes from @winche/admin, which acts with the server's own rights inside them (access rules don't apply,
  * unless `as(ctx.caller)`).
  */
-import { WincheError, DocumentReference, DocumentSnapshot, ChildReference, FileSnapshot, UserReference, UserSnapshot, decodeFields, encodeValue, fileData, userData, } from "@winche-technologies/admin";
+import { WincheError, DocumentReference, DocumentSnapshot, ChildReference, FileSnapshot, UserReference, UserSnapshot, decodeFields, encodeValue, fileData, userData, } from "@winche-technologies/winche-admin";
 /** @internal The run in progress: the runtime's (one per run, across its awaits), else a test's. */
 function current(what) {
     const g = globalThis;

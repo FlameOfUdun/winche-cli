@@ -10,7 +10,7 @@ sdks="$(cd "${1:-$here/../../TypeScript}" && pwd)"
 out="$here/tests/Winche.Cli.Tests/SdkPackages/@winche"
 for repo in winche-admin-typescript-sdk winche-functions-typescript-sdk; do
   (cd "$sdks/$repo" && { [ -d node_modules ] || npm install --silent; } && npm run build --silent >/dev/null)
-  name="$(sed -n 's/.*"name": *"@winche[-a-z]*\/\([^"]*\)".*/\1/p' "$sdks/$repo/package.json" | head -1)"   # admin, functions
+  name="$(sed -n 's/.*"name": *"@winche[-a-z]*\/\(winche-\)\{0,1\}\([^"]*\)".*/\2/p' "$sdks/$repo/package.json" | head -1)"   # admin, functions
   rm -rf "$out/$name" && mkdir -p "$out/$name"
   cp -R "$sdks/$repo/dist" "$sdks/$repo/package.json" "$out/$name/"
   echo "@winche/$name $(git -C "$sdks/$repo" rev-parse --short HEAD) → tests/Winche.Cli.Tests/SdkPackages/@winche/$name"
