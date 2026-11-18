@@ -8,7 +8,7 @@
  * Secrets, resources and @winche/admin read what the innermost `with…` gives while its callback runs (one at a time:
  * don't run tests in parallel that give different ones).
  */
-import { type AdminOptions, type Call } from "@winche/admin";
+import { type AdminOptions, type Call } from "@winche-technologies/admin";
 import type { Caller, Context } from "./index.js";
 /** Runs `fn` with these secrets' values (a secret not given reads as not set). */
 export declare function withSecrets<R>(values: {

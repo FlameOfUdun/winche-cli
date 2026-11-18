@@ -2,7 +2,7 @@
  * @winche/functions — write Winche functions.
  *
  *   import { onDocument, callable, schedule, secrets } from "@winche/functions";
- *   import { documents, FieldValue } from "@winche/admin";
+ *   import { documents, FieldValue } from "@winche-technologies/admin";
  *
  *   export const onVisit = onDocument.created("patients/{patientId}/visits/{visitId}", async (e, ctx) => {
  *     await documents.doc(`patients/${e.params.patientId}`).update({ lastVisit: e.data.get("at"), visits: FieldValue.increment(1) });
@@ -17,8 +17,8 @@
  * Their data comes from @winche/admin, which acts with the server's own rights inside them (access rules don't apply,
  * unless `as(ctx.caller)`).
  */
-import { type Call, type Json, type DocumentData, DocumentSnapshot, FileSnapshot, UserSnapshot } from "@winche/admin";
-export type { Json } from "@winche/admin";
+import { type Call, type Json, type DocumentData, DocumentSnapshot, FileSnapshot, UserSnapshot } from "@winche-technologies/admin";
+export type { Json } from "@winche-technologies/admin";
 /** Who called: a callable's signed-in caller, or the request a before-function checks. */
 export interface Caller {
     uid: string;
