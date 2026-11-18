@@ -40,7 +40,7 @@ winche products:start database storage                   # start products, follo
 winche apps:create "Clinic iOS" --apple-bundle-id com.example.clinic   # register an app (also: winche apps)
 winche members:add ann@example.com --role Member         # give someone access (also: winche members)
 winche settings pull                                     # the project's settings into settings/*.json (also diff, deploy)
-winche tokens:create gitlab-main --scopes rules,indexes  # a CI token (also tokens:list, tokens:revoke)
+winche accounts:create gitlab-main --scopes rules,indexes  # a service account for CI (accounts, accounts:keys:add, accounts:trust)
 winche logs -f                                           # the project's logs, then new ones as they come
 winche users                                             # your apps' users (users:disable, users:enable, users:sign-out)
 winche secrets:set smtp-password                         # a secret, typed unseen or from WINCHE_SECRET (or --ref aws-ssm:/app/key)
@@ -50,7 +50,7 @@ winche login:approve BCDF-GHJK                           # allow a CLI waiting w
 winche server settings pull                              # the server's own settings as files (server admins)
 winche indexes deploy -m "why"                           # database.indexes to the console (also diff, pull)
 winche functions init                                    # a functions/ folder: index.ts, deno.json (the SDKs from npm)
-winche functions deploy -m "what changed"                # deploy it through the console, as you (or a CI token)
+winche functions deploy -m "what changed"                # deploy it through the console, as you (or a service account)
 winche functions secrets                                 # the secrets functions read (secrets:set NAME, secrets:remove NAME)
 winche assets init                                       # an assets/ folder, assets.rules and its tests, in winche.json
 winche assets deploy -m "German"                         # publish the folder as a release; its channel points at it
@@ -141,8 +141,9 @@ winche settings pull                                   # settings/database.json,
   users:sign-out <email>` for the console's accounts (the last admin can't be turned off).
 - **Another machine without a browser:** run `winche login --no-browser` there, and allow its code from a CLI that's
   signed in as you: `winche login:approve <code>`. No browser is needed anywhere.
-- **CI tokens:** `winche tokens:create <name> --scopes functions,rules,indexes [--days 90]` shows the token once
-  (`--quiet`: only the token, for scripts). `tokens:list`, `tokens:revoke <id or name>`. A CI token can't make tokens.
+- **Service accounts:** `winche accounts:create <name> --scopes functions,rules,indexes` (CI) or `--role member` (a server);
+  `accounts:keys:add <name> [--days 90]` shows a key once (`--quiet`: only the key, for scripts); `accounts`,
+  `accounts:keys:revoke`, `accounts:trust`, `accounts:disable`, `accounts:delete`. A service account can't manage them.
 - **No browser here** (an SSH session, a server): `winche login --no-browser` shows a code and an address. Open it on
   any device, sign in, check the code and allow it.
 
@@ -242,7 +243,7 @@ collection group notes {
 `winche indexes pull` writes the console's to the file, `winche indexes diff` shows what deploying it would change, and
 `winche indexes deploy -m "why"` checks it on the console and saves it there (the note goes in the history). Indexes
 no longer listed are dropped; they build in the background. The console's Database → Settings → Indexes and expiry
-edits the same text. CI tokens need the `indexes` scope.
+edits the same text. Service accounts need the `indexes` scope.
 
 ## Testing rules
 
@@ -332,12 +333,15 @@ readable by you only.
   them (`*` marks the one in use), and `winche login:use <email>` switches. `winche logout <email>` ends one;
   `winche logout` ends them all.
 - Deploying needs the console's **Admin** role (and two-step sign-in, where the console requires it for settings).
-- **CI:** an admin makes a **CI token** (`winche tokens:create`, or **Project settings → CI tokens**): named (e.g. `gitlab-main`), with the
-  scopes it may deploy (`functions`, `rules`, `indexes`), expiring (30 days to 2 years), revocable. Set `WINCHE_TOKEN`
-  to it, or pass `--token` (and the console with `--console` or `WINCHE_CONSOLE`): `winche functions deploy`,
-  `winche rules deploy` and `winche indexes deploy` then run as that token, named in the version history
-  ("gitlab-main (CI token by ann@example.com)"). It stops working if its maker is no longer an admin, and can't do
-  anything but deploy. `winche functions deploy` exits with 1 when the code doesn't bundle, printing the problems.
+- **CI:** an admin makes a **service account** (`winche accounts:create`, or **Project settings → Service accounts**):
+  named (e.g. `gitlab-main`), with the scopes it may deploy (`functions`, `rules`, `indexes`, `assets`). It signs in
+  with a **trusted identity**, the CI job's own token (`winche accounts:trust gitlab-main --issuer https://gitlab.example.com
+  --subject 'project_path:team/app:ref_type:branch:ref:main' --audience <aud>`, then `WINCHE_ID_TOKEN` in the job: no
+  secret to keep), or a **key** (`winche accounts:keys:add`, then `WINCHE_TOKEN`; at most two, so one replaces the other
+  with no downtime). The CLI exchanges either for an hour's access token. Each deploy is named for it in the version
+  history ("gitlab-main (service account)"); it belongs to the project, and the console flags it if its maker is no
+  longer an admin. `winche functions deploy` exits with 1 when the code doesn't bundle, printing the problems. CI tokens
+  from before are service accounts now: their `WINCHE_TOKEN` keeps working (the CLI exchanges it).
 
 `winche functions deploy` also sends the project's console pages: the web files (`.html`, `.css`, `.js`, `.svg`, images,
 fonts) of the folders `pages({ files })` names. Binary files go as base64.
@@ -386,7 +390,7 @@ On Winche Server, references without the project's own AWS key are read with the
 admins may set those.
 
 Setting one applies from the functions' next run; there's nothing to deploy. It needs the Admin role (and two-step
-sign-in where the console requires it); a CI token can't. In the emulators, secrets come from `.secrets.local` in the
+sign-in where the console requires it); a service account can't. In the emulators, secrets come from `.secrets.local` in the
 functions folder (`NAME=value` lines, reloaded on save, never deployed; `winche functions init` adds it to
 `.gitignore`).
 
@@ -410,7 +414,7 @@ winche assets channels:remove beta          # its releases stay
 
 Deploy hashes every file and sends only what the server doesn't have, streamed, so a large video goes up once whatever
 the releases using it. A folder that's what the channel already has publishes nothing (`--force` makes a new release
-anyway). CI deploys with a token scoped to `assets` (`winche tokens:create ci --scopes assets,rules`).
+anyway). CI deploys as a service account scoped to `assets` (`winche accounts:create ci --scopes assets,rules`).
 
 ## Emulators
 

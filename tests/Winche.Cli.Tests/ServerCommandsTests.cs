@@ -189,33 +189,44 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         // Turning it on ends the account's other sessions, not this one: the CLI carries on (after the console's
         // 10-second session check comes round).
         await Task.Delay(TimeSpan.FromSeconds(11));
-        var after = await Run(null, "tokens:list");
+        var after = await Run(null, "accounts");
         Assert.True(after.Exit == 0, after.Err);
         Assert.Contains("Two-step sign-in is on", right.Out);
         Assert.Matches(@"\n  \S+", right.Out[right.Out.IndexOf("safe", StringComparison.Ordinal)..]);   // recovery codes
     }
 
     [Fact]
-    public async Task Ci_tokens_are_made_listed_and_revoked_from_the_terminal()
+    public async Task Service_accounts_are_made_from_the_terminal_and_their_keys_are_exchanged_by_the_cli()
     {
         await SetupAsync();
-        Assert.Contains("No CI tokens", (await Run(null, "tokens:list")).Out);
-        var made = await Run(null, "tokens:create", "gitlab-main", "--scopes", "rules,indexes", "--days", "30", "--quiet");
+        Assert.Contains("No service accounts", (await Run(null, "accounts")).Out);
+        Assert.NotEqual(0, (await Run(null, "accounts:create", "gitlab-main")).Exit);   // a role or scopes
+        var made = await Run(null, "accounts:create", "gitlab-main", "--scopes", "rules,indexes");
         Assert.True(made.Exit == 0, made.Err);
-        var secret = made.Out.Trim();
-        Assert.StartsWith("wct_", secret);
-        Assert.Contains("gitlab-main", (await Run(null, "tokens:list")).Out);
-        Assert.NotEqual(0, (await Run(null, "tokens:create", "x", "--scopes", "everything")).Exit);
+        var key = await Run(null, "accounts:keys:add", "gitlab-main", "--days", "30", "--quiet");
+        Assert.True(key.Exit == 0, key.Err);
+        var secret = key.Out.Trim();
+        Assert.StartsWith("wsk_", secret);
+        var listed = (await Run(null, "accounts")).Out;
+        Assert.Contains("gitlab-main  (deploys rules,indexes", listed);
+        Assert.Contains("never used", listed);
 
-        // The token works, and can't make tokens itself.
+        // The CLI exchanges the key; the account deploys rules, and can't manage service accounts.
         _vars["WINCHE_TOKEN"] = secret;
         Assert.Equal(0, (await Run(null, "rules", "history", "--only", "database")).Exit);
-        Assert.NotEqual(0, (await Run(null, "tokens:create", "y", "--scopes", "rules")).Exit);
+        Assert.NotEqual(0, (await Run(null, "accounts:create", "y", "--scopes", "rules")).Exit);
+        _vars["WINCHE_TOKEN"] = secret[..^1] + "x";
+        Assert.Contains("Couldn't sign in as the service account", (await Run(null, "rules", "history", "--only", "database")).Err);
         _vars.Remove("WINCHE_TOKEN");
 
-        Assert.Contains("Revoked the CI token gitlab-main", (await Run(null, "tokens:revoke", "gitlab-main")).Out);
-        Assert.Contains("No CI tokens", (await Run(null, "tokens:list")).Out);
-        Assert.Contains("No CI token gitlab-main", (await Run(null, "tokens:revoke", "gitlab-main")).Err);
+        Assert.Contains("used", (await Run(null, "accounts")).Out);
+        Assert.Contains("CI tokens became service accounts", (await Run(null, "tokens:list")).Err);
+        Assert.Contains("Turned gitlab-main off", (await Run(null, "accounts:disable", "gitlab-main")).Out);
+        _vars["WINCHE_TOKEN"] = secret;
+        Assert.NotEqual(0, (await Run(null, "rules", "history", "--only", "database")).Exit);
+        _vars.Remove("WINCHE_TOKEN");
+        Assert.Contains("Deleted the service account gitlab-main", (await Run(null, "accounts:delete", "gitlab-main")).Out);
+        Assert.Contains("No service account gitlab-main", (await Run(null, "accounts:delete", "gitlab-main")).Err);
     }
 
     [Fact]
@@ -357,8 +368,9 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         Assert.Equal(0, await waiting);
         Assert.Contains("Signed in to http://localhost as ann@example.com", text.ToString());
 
-        // A CI token can't approve anyone.
-        var ci = (await Run(null, "tokens:create", "ci", "--scopes", "rules", "--quiet")).Out.Trim();
+        // A service account can't approve anyone.
+        Assert.Equal(0, (await Run(null, "accounts:create", "ci", "--scopes", "rules")).Exit);
+        var ci = (await Run(null, "accounts:keys:add", "ci", "--quiet")).Out.Trim();
         var device = JsonNode.Parse(await (await _app.CreateClient().PostAsJsonAsync("/console/v1/cli/device",
             new { challenge = new string('a', 43), name = "box" })).Content.ReadAsStringAsync())!;
         _vars["WINCHE_TOKEN"] = ci;
@@ -370,13 +382,14 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Tokens_quiet_prints_only_the_token_even_with_a_named_project()
+    public async Task A_quiet_key_is_printed_alone_even_with_a_named_project()
     {
         await SetupAsync();
         File.WriteAllText(Path.Combine(_dir, "winche.json"), $$"""{ "server": "{{Url}}", "project": "demo", "projects": { "main": "{{Url}}/projects/demo" }, "rules": {} }""");
-        var made = await Run(null, "tokens:create", "ci", "--scopes", "rules", "--quiet");
+        Assert.Equal(0, (await Run(null, "accounts:create", "ci", "--scopes", "rules", "--quiet")).Exit);
+        var made = await Run(null, "accounts:keys:add", "ci", "--quiet");
         Assert.True(made.Exit == 0, made.Err);
-        Assert.Matches(@"^wct_\S+\n$", made.Out.Replace("\r", ""));
+        Assert.Matches(@"^wsk_\S+\n$", made.Out.Replace("\r", ""));
         // A pasted token with a line break in it is refused plainly.
         _vars["WINCHE_TOKEN"] = made.Out.Trim() + "\nProject: main";
         var bad = await Run(null, "rules", "history");

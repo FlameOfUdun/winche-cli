@@ -99,12 +99,12 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         File.WriteAllText(Path.Combine(_dir, "functions", "console", "reports", "index.html"), "<p>Reports</p>");
         File.WriteAllBytes(Path.Combine(_dir, "functions", "console", "reports", "logo.png"), [0x89, 0x50, 0x4E, 0x47]);
 
-        // In CI: a CI token from WINCHE_TOKEN.
+        // In CI: a service account's access token from WINCHE_TOKEN (used as it is; a key is exchanged first).
         var console = new FakeConsole();
-        (exit, output, var err) = await Run(console, v => v == "WINCHE_TOKEN" ? "wct_ci" : null, "functions", "deploy", "-m", "From CI");
+        (exit, output, var err) = await Run(console, v => v == "WINCHE_TOKEN" ? "wsa_ci" : null, "functions", "deploy", "-m", "From CI");
         Assert.True(exit == 0, err);
         var deploy = console.Requests.Single();
-        Assert.Equal(("/console/v1/projects/demo/functions/deploy", "Bearer wct_ci"), (deploy.Path, deploy.Auth));
+        Assert.Equal(("/console/v1/projects/demo/functions/deploy", "Bearer wsa_ci"), (deploy.Path, deploy.Auth));
         var sent = JsonNode.Parse(deploy.Body!)!;
         Assert.Equal(["console/reports/index.html", "console/reports/logo.png", "deno.json", "index.ts"], sent["files"]!.AsObject().Select(kv => kv.Key).Order());   // not .winche/, .vscode/ or notes
         Assert.Equal("base64:iVBORw==", sent["files"]!["console/reports/logo.png"]!.GetValue<string>());
@@ -113,7 +113,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
 
         console.DeployAnswer = HttpStatusCode.BadRequest;
         console.DeployReply = """{ "error": { "code": "invalid-argument", "reason": "functions", "message": "The code doesn't build.", "details": { "errors": ["index.ts:3: Expected ';'"] } } }""";
-        (exit, _, err) = await Run(console, v => v == "WINCHE_TOKEN" ? "wct_ci" : null, "functions", "deploy");
+        (exit, _, err) = await Run(console, v => v == "WINCHE_TOKEN" ? "wsa_ci" : null, "functions", "deploy");
         Assert.Equal(1, exit);
         Assert.Contains("Not deployed: The code doesn't build.", err);
         Assert.Contains("Expected ';'", err);
@@ -127,7 +127,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     [Fact]
     public async Task Pages_with_a_build_are_built_by_deploy_into_the_functions()
     {
-        static string? Ci(string v) => v == "WINCHE_TOKEN" ? "wct_ci" : null;
+        static string? Ci(string v) => v == "WINCHE_TOKEN" ? "wsa_ci" : null;
         File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "server": "https://api.example.com", "project": "demo", "functions": "functions", "pages": { "console/reports": { "source": "pages/reports" } } }""");
         await Run(new Recorder(), null, "functions", "init");
         Directory.CreateDirectory(Path.Combine(_dir, "pages", "reports"));
@@ -205,7 +205,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     public async Task Function_secrets_are_listed_set_from_a_variable_or_a_file_and_removed()
     {
         File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "server": "https://api.example.com", "project": "demo" }""");
-        string? Ci(string v) => v == "WINCHE_TOKEN" ? "wct_ci" : null;
+        string? Ci(string v) => v == "WINCHE_TOKEN" ? "wsa_ci" : null;
         var console = new FakeConsole();
 
         var (exit, output, err) = await Run(console, Ci, "functions", "secrets");
@@ -245,7 +245,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     public async Task Secrets_can_be_references_to_aws_tested_and_read_with_the_projects_own_key()
     {
         File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "server": "https://api.example.com", "project": "demo" }""");
-        string? Ci(string v) => v == "WINCHE_TOKEN" ? "wct_ci" : null;
+        string? Ci(string v) => v == "WINCHE_TOKEN" ? "wsa_ci" : null;
         var console = new FakeConsole();
 
         var (exit, output, err) = await Run(console, Ci, "functions", "secrets:set", "MAIL_KEY", "--ref", "aws-ssm:/app/mail#key");

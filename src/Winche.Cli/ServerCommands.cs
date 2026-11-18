@@ -331,50 +331,126 @@ internal static partial class CliApp
             if (what is not null && body["link"]?.ToString() is { Length: > 0 } link) env.Out.WriteLine($"{what} (the server can't send email, so pass it on): {link}");
         }
 
-        // ----- CI tokens ---------------------------------------------------------------------------
+        // ----- service accounts --------------------------------------------------------------------
 
-        public async Task<int> TokensListAsync(CancellationToken ct)
+        private async Task<(ConsoleClient Client, JsonObject Body)> AccountsAsync(CancellationToken ct)
         {
-            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "tokens", null, ct);
+            var client = await ClientAsync(ct);
+            var (status, body) = await client.SendAsync(HttpMethod.Get, "service-accounts", null, ct);
             if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
-            var tokens = body["tokens"]?.AsArray().Where(t => t?["kind"]?.GetValue<string>() == "ci").ToList() ?? [];
-            if (tokens.Count == 0) env.Out.WriteLine("No CI tokens. Make one: winche tokens:create <name> --scopes functions,rules,indexes");
-            foreach (var t in tokens)
+            return (client, body);
+        }
+
+        /// <summary>The account named (or with the id) <paramref name="which"/>.</summary>
+        private static JsonNode Account(JsonObject body, string which) =>
+            body["accounts"]?.AsArray().FirstOrDefault(a => a?["name"]?.GetValue<string>() == which || a?["id"]?.GetValue<string>() == which)
+            ?? throw new CliException($"No service account {which}. See them: winche accounts");
+
+        /// <summary><c>winche accounts</c>: each account, its role or scopes, keys and trusted identities.</summary>
+        public async Task<int> AccountsListAsync(CancellationToken ct)
+        {
+            var (_, body) = await AccountsAsync(ct);
+            var accounts = body["accounts"]?.AsArray() ?? [];
+            if (accounts.Count == 0) env.Out.WriteLine("No service accounts. Make one: winche accounts:create <name> --scopes functions,rules (CI) or --role member (a server)");
+            foreach (var a in accounts)
             {
-                var used = t!["lastUsedAt"]?.GetValue<DateTimeOffset>() is { } at ? $"used {at:yyyy-MM-dd}" : "never used";
-                env.Out.WriteLine($"  {t["id"]}  {t["name"],-20} {string.Join(",", t["scopes"]!.AsArray()),-24} by {t["user"]}, until {t["expiresAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd}, {used}");
+                var what = a!["role"]?.GetValue<string>() is { } role ? $"role {role.ToLowerInvariant()}" : $"deploys {string.Join(",", a["scopes"]!.AsArray())}";
+                var used = a["lastUsedAt"]?.GetValue<DateTimeOffset>() is { } at ? $"used {at:yyyy-MM-dd}" : "never used";
+                env.Out.WriteLine($"{a["name"]}  ({what}; by {a["createdBy"]}; {used}{(a["disabled"]?.GetValue<bool>() == true ? "; turned off" : "")})");
+                if (a["makerIsAdmin"]?.GetValue<bool>() == false) env.Out.WriteLine($"  ! {a["createdBy"]} is no longer an admin here: check it's still needed, and replace its key if they had it");
+                foreach (var k in a["keys"]!.AsArray())
+                    env.Out.WriteLine($"  key {k!["id"]}  until {k["expiresAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd}, " +
+                        (k["lastUsedAt"]?.GetValue<DateTimeOffset>() is { } ku ? $"used {ku:yyyy-MM-dd}{(k["lastUsedFrom"]?.GetValue<string>() is { } from ? $" from {from}" : "")}" : "never used") +
+                        (k["unused"]?.GetValue<bool>() == true ? " (unused 90 days)" : ""));
+                foreach (var i in a["identities"]!.AsArray())
+                    env.Out.WriteLine($"  trusts {i!["id"]}  {i["issuer"]}, subject {i["subject"]}, audience {i["audience"]}");
             }
             return 0;
         }
 
-        public async Task<int> TokensCreateAsync(string name, CancellationToken ct)
+        /// <summary><c>winche accounts:create &lt;name&gt; --role viewer|member|admin | --scopes functions,rules,…</c>.</summary>
+        public async Task<int> AccountsCreateAsync(string name, CancellationToken ct)
         {
-            var scopes = (args.Value("scopes") ?? throw new CliException("--scopes: what it may deploy, e.g. --scopes functions,rules,indexes", 2))
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var days = args.Value("days") is { } d ? (int.TryParse(d, out var n) ? n : throw new CliException($"--days {d} isn't a number.", 2)) : 90;
-            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Post, "tokens", new { name, scopes, days }, ct);
+            var role = args.Value("role");
+            var scopes = args.Value("scopes")?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
+            if ((role is null) == (scopes.Length == 0))
+                throw new CliException("Give it --role viewer|member|admin (a server using the data) or --scopes functions,rules,indexes,assets (CI that deploys).", 2);
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Post, "service-accounts", new { name, role, scopes }, ct);
             if (status != HttpStatusCode.OK) throw new CliException($"Not made: {ConsoleClient.ErrorText(body, status)}");
-            if (args.Flag("quiet")) { env.Out.WriteLine(body["secret"]); return 0; }
-            env.Out.WriteLine($"Made the CI token {name} ({body["token"]?["id"]}), for {string.Join(", ", scopes)}, for {days} days. It's shown once:");
-            env.Out.WriteLine(body["secret"]);
-            env.Out.WriteLine("Put it in your CI's secrets as WINCHE_TOKEN.");
+            env.Out.WriteLine($"Made the service account {name}. Give it a key (winche accounts:keys:add {name}) or trust its CI's identity (winche accounts:trust {name} --issuer … --subject … --audience …).");
             return 0;
         }
 
-        /// <summary><c>winche tokens:revoke &lt;id or name&gt;</c>.</summary>
-        public async Task<int> TokensRevokeAsync(string which, CancellationToken ct)
+        /// <summary><c>winche accounts:keys:add &lt;account&gt; [--days 90] [--quiet]</c>: the key, shown once.</summary>
+        public async Task<int> AccountsKeysAddAsync(string which, CancellationToken ct)
         {
-            var client = await ClientAsync(ct);
-            var (status, body) = await client.SendAsync(HttpMethod.Get, "tokens", null, ct);
-            if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
-            var matches = body["tokens"]?.AsArray().Where(t => t?["kind"]?.GetValue<string>() == "ci" &&
-                (t["id"]?.GetValue<string>() == which || t["name"]?.GetValue<string>() == which)).ToList() ?? [];
-            if (matches.Count == 0) throw new CliException($"No CI token {which}. See them: winche tokens:list");
-            if (matches.Count > 1) throw new CliException($"More than one CI token is called {which}: revoke it by id (winche tokens:list).");
-            var id = matches[0]!["id"]!.GetValue<string>();
-            (status, body) = await client.SendAsync(HttpMethod.Delete, $"tokens/{id}", null, ct);
+            var days = args.Value("days") is { } d ? (int.TryParse(d, out var n) ? n : throw new CliException($"--days {d} isn't a number.", 2)) : 90;
+            var (client, list) = await AccountsAsync(ct);
+            var account = Account(list, which);
+            var (status, body) = await client.SendAsync(HttpMethod.Post, $"service-accounts/{account["id"]}/keys", new { days }, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Not made: {ConsoleClient.ErrorText(body, status)}");
+            if (args.Flag("quiet")) { env.Out.WriteLine(body["secret"]); return 0; }
+            env.Out.WriteLine($"A key for {account["name"]}, for {days} days. It's shown once:");
+            env.Out.WriteLine(body["secret"]);
+            env.Out.WriteLine("Put it in the secrets of what uses it: WINCHE_TOKEN for the CLI, or initializeAdmin({ key }) for @winche/admin.");
+            return 0;
+        }
+
+        /// <summary><c>winche accounts:keys:revoke &lt;account&gt; &lt;key id&gt;</c>.</summary>
+        public async Task<int> AccountsKeysRevokeAsync(string which, string keyId, CancellationToken ct)
+        {
+            var (client, list) = await AccountsAsync(ct);
+            var account = Account(list, which);
+            var (status, body) = await client.SendAsync(HttpMethod.Delete, $"service-accounts/{account["id"]}/keys/{Uri.EscapeDataString(keyId)}", null, ct);
             if (status != HttpStatusCode.NoContent) throw new CliException($"Not revoked: {ConsoleClient.ErrorText(body, status)}");
-            env.Out.WriteLine($"Revoked the CI token {matches[0]!["name"]} ({id}).");
+            env.Out.WriteLine($"Revoked the key {keyId} of {account["name"]}.");
+            return 0;
+        }
+
+        /// <summary><c>winche accounts:trust &lt;account&gt; --issuer &lt;url&gt; --subject &lt;pattern&gt; --audience &lt;aud&gt;</c>.</summary>
+        public async Task<int> AccountsTrustAsync(string which, CancellationToken ct)
+        {
+            string Need(string flag) => args.Value(flag) ?? throw new CliException($"Give --{flag}.", 2);
+            var (client, list) = await AccountsAsync(ct);
+            var account = Account(list, which);
+            var (status, body) = await client.SendAsync(HttpMethod.Post, $"service-accounts/{account["id"]}/identities",
+                new { issuer = Need("issuer"), subject = Need("subject"), audience = Need("audience") }, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Not trusted: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine($"{account["name"]} trusts tokens from {args.Value("issuer")} for {args.Value("subject")}: set WINCHE_ID_TOKEN to the job's token (audience {args.Value("audience")}).");
+            return 0;
+        }
+
+        /// <summary><c>winche accounts:untrust &lt;account&gt; &lt;identity id&gt;</c>.</summary>
+        public async Task<int> AccountsUntrustAsync(string which, string identityId, CancellationToken ct)
+        {
+            var (client, list) = await AccountsAsync(ct);
+            var account = Account(list, which);
+            var (status, body) = await client.SendAsync(HttpMethod.Delete, $"service-accounts/{account["id"]}/identities/{Uri.EscapeDataString(identityId)}", null, ct);
+            if (status != HttpStatusCode.NoContent) throw new CliException($"Not removed: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine($"{account["name"]} no longer trusts {identityId}.");
+            return 0;
+        }
+
+        /// <summary><c>winche accounts:disable | accounts:enable &lt;account&gt;</c>.</summary>
+        public async Task<int> AccountsSwitchAsync(string which, bool disabled, CancellationToken ct)
+        {
+            var (client, list) = await AccountsAsync(ct);
+            var account = Account(list, which);
+            var (status, body) = await client.SendAsync(HttpMethod.Put, $"service-accounts/{account["id"]}",
+                new { role = account["role"]?.GetValue<string>(), scopes = account["scopes"]!.AsArray().Select(s => s!.GetValue<string>()).ToArray(), disabled }, ct);
+            if (status != HttpStatusCode.NoContent) throw new CliException($"Not changed: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine(disabled ? $"Turned {account["name"]} off: nothing can sign in as it." : $"Turned {account["name"]} on.");
+            return 0;
+        }
+
+        /// <summary><c>winche accounts:delete &lt;account&gt;</c>.</summary>
+        public async Task<int> AccountsDeleteAsync(string which, CancellationToken ct)
+        {
+            var (client, list) = await AccountsAsync(ct);
+            var account = Account(list, which);
+            var (status, body) = await client.SendAsync(HttpMethod.Delete, $"service-accounts/{account["id"]}", null, ct);
+            if (status != HttpStatusCode.NoContent) throw new CliException($"Not deleted: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine($"Deleted the service account {account["name"]}, its keys and trusted identities.");
             return 0;
         }
 

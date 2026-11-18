@@ -73,9 +73,18 @@ internal static partial class CliApp
           server secrets, server secrets:set <name>   The server's secrets (WINCHE_SECRET, or typed unseen; or --ref)
           server users, server users:disable | server users:enable | server users:sign-out <email>
                                The console's accounts
-          tokens:list          The project's CI tokens
-          tokens:create <name> Make a CI token (--scopes functions,rules,indexes,assets; --days, default 90; --quiet: only it)
-          tokens:revoke <id>   Revoke a CI token (by id or name)
+          accounts             The project's service accounts (what CI and other servers act as): roles or scopes,
+                               keys, trusted identities
+          accounts:create <name>
+                               --role viewer|member|admin (a server using the data) or --scopes functions,rules,
+                               indexes,assets (CI that deploys)
+          accounts:keys:add <account>
+                               A key, shown once (--days, default 90; --quiet: only it); two at most
+          accounts:keys:revoke <account> <key id>
+          accounts:trust <account> --issuer <url> --subject <pattern> --audience <aud>
+                               Trust a CI's own tokens (OpenID Connect) instead of a key: WINCHE_ID_TOKEN
+          accounts:untrust <account> <identity id>
+          accounts:disable | accounts:enable | accounts:delete <account>
           settings pull        Write the project's settings into settings/*.json (--only database,storage,auth,…)
           settings diff        How the settings files differ from the project's
           settings deploy      Save the changed settings files as new versions (-m: the note; --dry-run)
@@ -122,7 +131,9 @@ internal static partial class CliApp
                                (or WINCHE_CONSOLE, or "server" and "project" in winche.json)
           -P, --project <name> A project from winche.json's "projects" (instead of the one picked with winche use), or
                                a project id on the same Winche Server; configure: the project at --url/projects/<id>
-          --token <token>      A CI token (winche tokens:create, or Project settings → CI tokens) instead of a saved sign-in (or WINCHE_TOKEN)
+          --token <token>      A service account's key (exchanged for an access token) or access token, instead of a
+                               saved sign-in (or WINCHE_TOKEN; or WINCHE_ID_TOKEN: the CI job's own token, for an
+                               account that trusts its identity)
           --config <path>      winche.json to use (default: the nearest one upward)
           --only <list>        database, storage, assets, comma-separated (default: every file in winche.json)
           -m, --message <text> Note for the deployed versions, or the assets release (deploy)
@@ -223,9 +234,18 @@ internal static partial class CliApp
                 "login:approve" => await run.LoginApproveAsync(Arg(1), ct),
                 "logs" => await run.LogsAsync(ct),
                 "products:start" => await run.ProductsStartAsync(a.Positional.Skip(1).ToList(), ct),
-                "tokens:list" => await run.TokensListAsync(ct),
-                "tokens:create" => await run.TokensCreateAsync(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche tokens:create <name> --scopes functions,rules,indexes,assets [--days 90]", 2), ct),
-                "tokens:revoke" => await run.TokensRevokeAsync(a.Positional.ElementAtOrDefault(1) ?? throw new CliException("Usage: winche tokens:revoke <id>", 2), ct),
+                "accounts" => await run.AccountsListAsync(ct),
+                "accounts:create" => await run.AccountsCreateAsync(Arg(1) ?? throw new CliException("Usage: winche accounts:create <name> --role viewer|member|admin | --scopes functions,rules,indexes,assets", 2), ct),
+                "accounts:keys:add" => await run.AccountsKeysAddAsync(Arg(1) ?? throw new CliException("Usage: winche accounts:keys:add <account> [--days 90]", 2), ct),
+                "accounts:keys:revoke" => await run.AccountsKeysRevokeAsync(Arg(1) ?? throw new CliException("Usage: winche accounts:keys:revoke <account> <key id>", 2),
+                    Arg(2) ?? throw new CliException("Usage: winche accounts:keys:revoke <account> <key id>", 2), ct),
+                "accounts:trust" => await run.AccountsTrustAsync(Arg(1) ?? throw new CliException("Usage: winche accounts:trust <account> --issuer <url> --subject <pattern> --audience <aud>", 2), ct),
+                "accounts:untrust" => await run.AccountsUntrustAsync(Arg(1) ?? throw new CliException("Usage: winche accounts:untrust <account> <identity id>", 2),
+                    Arg(2) ?? throw new CliException("Usage: winche accounts:untrust <account> <identity id>", 2), ct),
+                "accounts:disable" => await run.AccountsSwitchAsync(Arg(1) ?? throw new CliException("Usage: winche accounts:disable <account>", 2), true, ct),
+                "accounts:enable" => await run.AccountsSwitchAsync(Arg(1) ?? throw new CliException("Usage: winche accounts:enable <account>", 2), false, ct),
+                "accounts:delete" => await run.AccountsDeleteAsync(Arg(1) ?? throw new CliException("Usage: winche accounts:delete <account>", 2), ct),
+                "tokens:list" or "tokens:create" or "tokens:revoke" => throw new CliException("CI tokens became service accounts: winche accounts (accounts:create, accounts:keys:add, accounts:trust).", 2),
                 "settings pull" => await run.SettingsPullAsync(ct),
                 "settings diff" => await run.SettingsDiffAsync(ct),
                 "settings deploy" => await run.SettingsDeployAsync(ct),
@@ -844,28 +864,38 @@ internal static partial class CliApp
 
         private async Task<ConsoleClient> ClientAsync(CancellationToken ct) => await ClientAsync(null, ct);
 
-        /// <summary>A client for <paramref name="url"/> (default: the project's console), signed in or with a CI token.</summary>
+        /// <summary>
+        /// A client for <paramref name="url"/> (default: the project's console): as a service account (WINCHE_TOKEN or
+        /// --token: a key, exchanged for an access token, or an access token; or WINCHE_ID_TOKEN: the CI job's own token,
+        /// for an account that trusts its identity), else as the signed-in account.
+        /// </summary>
         private async Task<ConsoleClient> ClientAsync(Uri? url, CancellationToken ct)
         {
-            if (url is not null)
+            Uri console;
+            if (url is not null) console = url;
+            else
             {
-                var direct = (args.Value("token") ?? env.GetVariable("WINCHE_TOKEN"))?.Trim();
-                if (direct is not null && direct.Any(char.IsWhiteSpace))
-                    throw new CliException("The token has spaces or more than one line in it: set WINCHE_TOKEN (or --token) to the token alone.", 2);
-                if (string.IsNullOrWhiteSpace(direct))
-                    direct = await SignedInTokenAsync(env, http, url, ct) ?? throw new CliException($"Not signed in to {CredentialStore.Key(url)}. Run: winche login");
-                return new ConsoleClient(http, url, direct);
+                var target = Target();
+                console = target.Url;
+                if (target.Alias is not null && !args.Flag("quiet")) env.Out.WriteLine($"Project: {target.Describe()}");
             }
-            var target = Target();
-            var console = target.Url;
-            if (target.Alias is not null && !args.Flag("quiet")) env.Out.WriteLine($"Project: {target.Describe()}");
+            var token = await ServiceAccountTokenAsync(console, ct)
+                        ?? await SignedInTokenAsync(env, http, console, ct)
+                        ?? throw new CliException($"Not signed in to {CredentialStore.Key(console)}. Run: winche login");
+            return new ConsoleClient(http, console, token);
+        }
+
+        /// <summary>The service account's access token, from WINCHE_TOKEN / --token or WINCHE_ID_TOKEN; null without either.</summary>
+        private async Task<string?> ServiceAccountTokenAsync(Uri console, CancellationToken ct)
+        {
             var token = (args.Value("token") ?? env.GetVariable("WINCHE_TOKEN"))?.Trim();
             if (token is not null && token.Any(char.IsWhiteSpace))
                 throw new CliException("The token has spaces or more than one line in it: set WINCHE_TOKEN (or --token) to the token alone.", 2);
-            if (string.IsNullOrWhiteSpace(token))
-                token = await SignedInTokenAsync(env, http, console, ct)
-                        ?? throw new CliException($"Not signed in to {CredentialStore.Key(console)}. Run: winche login");
-            return new ConsoleClient(http, console, token);
+            if (!string.IsNullOrEmpty(token))
+                return ServiceAccounts.IsKey(token) ? await ServiceAccounts.ExchangeAsync(http, console, new { key = token }, ct) : token;
+            if (env.GetVariable("WINCHE_ID_TOKEN")?.Trim() is { Length: > 0 } identity)
+                return await ServiceAccounts.ExchangeAsync(http, console, new { assertion = identity }, ct);
+            return null;
         }
 
         /// <summary>
@@ -1244,7 +1274,7 @@ internal sealed class Args
 {
     private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose", "reauth", "no-browser", "no-build",
         "rotate", "path-style", "finish", "cancel", "keep-old", "follow"];
-    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "folder", "title", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
+    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "folder", "title", "role", "issuer", "subject", "audience", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
         "role", "sdk", "android-package", "apple-bundle-id", "web-origin",
         "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel",
