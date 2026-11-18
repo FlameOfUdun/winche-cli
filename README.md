@@ -51,7 +51,6 @@ winche server settings pull                              # the server's own sett
 winche indexes deploy -m "why"                           # database.indexes to the console (also diff, pull)
 winche functions init                                    # a functions/ folder: index.ts, deno.json, types for VS Code
 winche functions deploy -m "what changed"                # deploy it through the console, as you (or a CI token)
-winche pages init pages/reports                          # a console page as a Vite + React project (deploy builds it)
 winche functions secrets                                 # the secrets functions read (secrets:set NAME, secrets:remove NAME)
 winche assets init                                       # an assets/ folder, assets.rules and its tests, in winche.json
 winche assets deploy -m "German"                         # publish the folder as a release; its channel points at it
@@ -341,39 +340,25 @@ readable by you only.
   anything but deploy. `winche functions deploy` exits with 1 when the code doesn't bundle, printing the problems.
 
 `winche functions deploy` also sends the project's console pages: the web files (`.html`, `.css`, `.js`, `.svg`, images,
-fonts) of the folders `consolePage({ files })` names. Binary files go as base64.
+fonts) of the folders `pages({ files })` names. Binary files go as base64.
 
 ### Console pages with a build (React, Vite, …)
 
-A page can be a front-end project of its own. `winche pages init pages/reports` makes one (Vite, React, TypeScript)
-and adds it to `winche.json`:
+A page can be a front-end project of its own. Name it in `winche.json`:
 
 ```json
 "pages": { "console/reports": { "source": "pages/reports" } }
 ```
 
-The key is the folder `consolePage({ files })` names; `build` (default `npm run build`) and `output` (default `dist`)
-say how it's built. `winche functions deploy` runs each page's build and deploys its output as that folder (`--no-build`
-deploys the last output; `winche pages build` only builds). With `winche emulators start`, run the page's
-`npm run watch`: the emulator redeploys when its output changes.
+The key is the folder `pages({ files })` names; `build` (default `npm run build`) and `output` (default `dist`) say how
+it's built. `winche functions deploy` runs each page's build and deploys its output as that folder (`--no-build`
+deploys the last output; `winche pages build` only builds). With `winche emulators start`, run the page's build in
+watch mode: the emulator redeploys when its output changes.
 
-The page reaches the project through its actions, with `@winche/console-page` (written into the page's
-`.winche/console-page/` and refreshed at every build):
-
-```tsx
-import { useAction, useRun } from "@winche/console-page/react";
-
-const status = useAction<Status>("jobStatus", null, { refreshEvery: (r) => (r.running ? 3000 : false) });
-const start = useRun("startJob", { confirm: "Start the job?", after: status.refresh });
-```
-
-`call`, `confirm`, `toast`, `navigate`, `setTitle`, `user()` and `theme()` are there without React too. A page runs in
-the console's sandboxed frame without its sign-in: it can't fetch, and every action runs with the signed-in person's
-role. Anything that builds to static files with relative addresses works (Vite's `base: "./"`); server rendering and
-API routes don't (actions take their place).
-
-It sends the functions folder's `resources/` folder too (`ctx.resources` in functions): it asks the console which
-contents it doesn't have yet (by SHA-256) and uploads only those, so unchanged fonts or translations aren't sent again.
+In a page, `import { documents } from "@winche/admin"` acts as the person who opened it (their role in the project
+limits it). The console resolves `@winche/admin` with an import map, so a bundler leaves it out: with Vite,
+`build: { rollupOptions: { external: ["@winche/admin"] } }`, and `base: "./"` (a page's files are addressed relative to
+it). Server rendering and API routes don't apply: anything that builds to static files works.
 
 ### Function secrets
 

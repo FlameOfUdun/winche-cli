@@ -88,9 +88,8 @@ internal static partial class CliApp
                                Make a functions folder (default functions/): an example, deno.json, types for VS Code
           functions deploy [<dir>]
                                Deploy the functions folder through the console, as you (winche login) or a CI token
-          pages init <dir>     Make a console page project in <dir> (Vite + React + TypeScript, with @winche/console-page) and
-                               add it to winche.json's "pages" (--folder: the consolePage's files, default console/<dir's name>)
-          pages build          Build the pages in winche.json (functions deploy builds them too; --no-build skips it)
+          pages build          Build the console pages with a build in winche.json ("pages"; functions deploy builds them too,
+                               --no-build skips it)
           functions secrets    The secrets functions read (ctx.secrets): set or not, by whom, which functions use them
           functions secrets:set <NAME>
                                Add or replace one (the value from WINCHE_SECRET, --from-file <path>, or typed unseen;
@@ -237,7 +236,6 @@ internal static partial class CliApp
                 "functions secrets" => await run.FunctionSecretsAsync(ct),
                 "functions secrets:set" => await run.FunctionSecretSetAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:set <NAME> [--from-file <path>]", 2), ct),
                 "functions secrets:remove" => await run.FunctionSecretRemoveAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:remove <NAME>", 2), ct),
-                "pages init" => run.PagesInit(Arg(2) ?? throw new CliException("Usage: winche pages init <dir> [--folder console/<name>] [--title <title>]", 2)),
                 "pages build" => await run.PagesBuildAsync(ct),
                 "assets init" => run.AssetsInit(Arg(2)),
                 "assets deploy" => await run.AssetsDeployAsync(Arg(2), ct),
@@ -460,37 +458,10 @@ internal static partial class CliApp
         private string FunctionsDir(string? given) => given is not null ? Path.GetFullPath(given, env.WorkingDirectory)
             : Config?.FunctionsPath ?? Path.Combine(Config?.Directory ?? env.WorkingDirectory, "functions");
 
-        public int PagesInit(string dir)
-        {
-            var config = Config ?? throw new CliException("There's no winche.json here: run winche init first.");
-            var target = Path.GetFullPath(dir, env.WorkingDirectory);
-            var name = Path.GetFileName(target.TrimEnd(Path.DirectorySeparatorChar));
-            var folder = args.Value("folder") ?? $"console/{name}";
-            var title = args.Value("title") ?? (name.Length == 0 ? "Page" : char.ToUpperInvariant(name[0]) + name[1..]);
-            foreach (var f in PageBuilds.Init(target, title)) env.Out.WriteLine($"  wrote {Path.GetRelativePath(env.WorkingDirectory, Path.Combine(target, f))}");
-            var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(config.FilePath!))!.AsObject();
-            var pages = json["pages"] as System.Text.Json.Nodes.JsonObject ?? (System.Text.Json.Nodes.JsonObject)(json["pages"] = new System.Text.Json.Nodes.JsonObject());
-            if (!pages.ContainsKey(folder))
-            {
-                pages[folder] = new System.Text.Json.Nodes.JsonObject { ["source"] = Path.GetRelativePath(config.Directory, target).Replace('\\', '/') };
-                File.WriteAllText(config.FilePath!, json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
-                env.Out.WriteLine($"  added pages.\"{folder}\" to {Path.GetFileName(config.FilePath!)}");
-            }
-            var compact = string.Concat(title.Where(char.IsLetterOrDigit));
-            var export = (compact.Length == 0 ? "page" : char.ToLowerInvariant(compact[0]) + compact[1..]) + "Page";
-            env.Out.WriteLine("The page is ready. Next:");
-            env.Out.WriteLine($"  1. npm install (in {Path.GetRelativePath(env.WorkingDirectory, target)})");
-            env.Out.WriteLine($"  2. In the functions: export const {export} = consolePage({{ title: \"{title}\", files: \"{folder}\" }});");
-            env.Out.WriteLine("     and its actions with consoleAction(...)");
-            env.Out.WriteLine("  3. winche functions deploy (builds the page, then deploys it with the functions)");
-            env.Out.WriteLine("While working: npm run watch, with winche emulators start (it redeploys when the build changes).");
-            return 0;
-        }
-
         public async Task<int> PagesBuildAsync(CancellationToken ct)
         {
             var pages = PageBuilds.Of(Config);
-            if (pages.Count == 0) { env.Out.WriteLine("There are no pages in winche.json (winche pages init <dir> makes one)."); return 0; }
+            if (pages.Count == 0) { env.Out.WriteLine("There are no pages with a build in winche.json (\"pages\")."); return 0; }
             return await PageBuilds.BuildAsync(pages, env, ct) ? 0 : 1;
         }
 

@@ -123,18 +123,13 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     }
 
     [Fact]
-    public async Task Pages_init_makes_a_page_project_and_deploy_builds_it_into_the_functions()
+    public async Task Pages_with_a_build_are_built_by_deploy_into_the_functions()
     {
         static string? Ci(string v) => v == "WINCHE_TOKEN" ? "wct_ci" : null;
-        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "server": "https://api.example.com", "project": "demo", "functions": "functions" }""");
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "server": "https://api.example.com", "project": "demo", "functions": "functions", "pages": { "console/reports": { "source": "pages/reports" } } }""");
         await Run(new Recorder(), null, "functions", "init");
-        var (exit, output, _) = await Run(new Recorder(), null, "pages", "init", "pages/reports");
-        Assert.Equal(0, exit);
-        foreach (var f in new[] { "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/App.tsx", ".winche/console-page/index.ts", ".winche/console-page/react.ts" })
-            Assert.True(File.Exists(Path.Combine(_dir, "pages", "reports", f)), f);
-        Assert.Contains("base: \"./\"", File.ReadAllText(Path.Combine(_dir, "pages", "reports", "vite.config.ts")));
-        Assert.Equal("pages/reports", JsonNode.Parse(File.ReadAllText(Path.Combine(_dir, "winche.json")))!["pages"]!["console/reports"]!["source"]!.GetValue<string>());
-        Assert.Contains("consolePage({ title: \"Reports\", files: \"console/reports\" })", output);
+        Directory.CreateDirectory(Path.Combine(_dir, "pages", "reports"));
+        int exit; string output;
 
         // A stand-in build (no npm here): its output replaces whatever the functions folder had for the page.
         var config = JsonNode.Parse(File.ReadAllText(Path.Combine(_dir, "winche.json")))!;
@@ -143,7 +138,6 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         File.WriteAllText(Path.Combine(_dir, "winche.json"), config.ToJsonString());
         Directory.CreateDirectory(Path.Combine(_dir, "functions", "console", "reports"));
         File.WriteAllText(Path.Combine(_dir, "functions", "console", "reports", "old.html"), "stale");
-        File.Delete(Path.Combine(_dir, "pages", "reports", ".winche", "console-page", "react.ts"));
         var console = new Recorder();
         (exit, output, var deployErr) = await Run(console, Ci, "functions", "deploy");
         Assert.True(exit == 0, deployErr);
@@ -153,7 +147,6 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         Assert.Equal("x", files["console/reports/assets/app.js"]!.GetValue<string>());
         Assert.False(files.ContainsKey("console/reports/assets/notes.md"));   // not a page file
         Assert.False(files.ContainsKey("console/reports/old.html"));
-        Assert.True(File.Exists(Path.Combine(_dir, "pages", "reports", ".winche", "console-page", "react.ts")));   // refreshed at every build
 
         // A failing build deploys nothing; --no-build deploys the last output.
         config["pages"]!["console/reports"]!["build"] = "echo broken >&2; exit 3";
@@ -318,8 +311,9 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         // Secrets for the emulator come from functions/.secrets.local, which is never deployed.
         File.WriteAllText(Path.Combine(_dir, "functions", ".secrets.local"), "# local only\nMAIL_KEY=\"k-local-1\"\n");
         File.WriteAllText(Path.Combine(_dir, "functions", "index.ts"), """
-            import { callable } from "@winche/functions";
-            export const keyed = callable(async (_d, ctx) => ({ key: ctx.secrets.get("MAIL_KEY") }), { secrets: ["MAIL_KEY"] });
+            import { callable, secrets } from "@winche/functions";
+            const mailKey = secrets.define("MAIL_KEY");
+            export const keyed = callable(async () => ({ key: mailKey.value() }), { secrets: [mailKey] });
             """);
         Assert.DoesNotContain(".secrets.local", FunctionsFolder.Read(Path.Combine(_dir, "functions")).Keys);
         (exit, output, err) = await Run(new HttpClientHandler(), v => v == "WINCHE_DENO" ? deno : null,

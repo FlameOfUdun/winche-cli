@@ -42,7 +42,7 @@ internal sealed class ProjectConfig
     [JsonPropertyName("assets")] public AssetsConfig? Assets { get; set; }
     /// <summary>
     /// Console pages built from a project of their own (React, Vite, …): the folder in the functions deployment that a
-    /// consolePage's <c>files</c> names → where its project is and how it's built.
+    /// pages()'s <c>files</c> names → where its project is and how it's built.
     /// </summary>
     [JsonPropertyName("pages")] public Dictionary<string, PageConfig>? Pages { get; set; }
 
