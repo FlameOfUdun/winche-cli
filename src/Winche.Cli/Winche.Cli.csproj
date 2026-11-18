@@ -23,8 +23,8 @@
     <PackageReference Include="Winche.Rules" Version="5.0.0" />
     <PackageReference Include="Winche.Database.AspNetCore.Rest" Version="12.1.0" />
     <PackageReference Include="Winche.Database.AspNetCore.WebSockets" Version="12.1.0" />
-    <PackageReference Include="Winche.Storage.AspNetCore.Rest" Version="11.0.0" />
-    <PackageReference Include="Winche.Storage.FileSystem" Version="11.0.0" />
+    <PackageReference Include="Winche.Storage.AspNetCore.Rest" Version="11.1.0" />
+    <PackageReference Include="Winche.Storage.FileSystem" Version="11.1.0" />
     <PackageReference Include="Winche.Storage.S3" Version="9.1.0" />
     <PackageReference Include="Winche.Functions.Database" Version="3.0.0" />
     <PackageReference Include="Winche.Functions.Storage" Version="3.0.0" />
