@@ -362,8 +362,8 @@ it). Server rendering and API routes don't apply: anything that builds to static
 
 ### Function secrets
 
-Functions read API keys and passwords with `ctx.secrets.get("NAME")`, declaring them in their options
-(`{ secrets: ["NAME"] }`). They're kept encrypted on the server and never shown again:
+Functions read API keys and passwords through handles: `const key = secrets.define("NAME")` at the top, listed in the
+functions' options (`{ secrets: [key] }`), read with `key.value()`. They're kept encrypted on the server and never shown again:
 
 ```sh
 winche functions secrets                                  # each one: set or not, when, by whom, which functions use it
