@@ -136,7 +136,8 @@ internal static class FunctionsFolder
     }
 
     public const string Example = """
-        import { callable, documents, HttpsError } from "@winche/functions";
+        import { callable, HttpsError } from "@winche/functions";
+        import { documents } from "@winche/admin";
 
         // Called by apps: functions.call("hello", { name: "Ann" })
         export const hello = callable(async (data: { name?: string }, ctx) => {
@@ -145,9 +146,9 @@ internal static class FunctionsFolder
           return { greeting: `Hello ${data.name}`, by: ctx.caller?.uid ?? null };
         });
 
-        // When a document is created: {name} parts of the path are in e.params
-        // export const onVisit = documents.onCreated("patients/{patientId}/visits/{visitId}", async (e, ctx) => {
-        //   await ctx.documents.doc(`patients/${e.params.patientId}`).update({ lastVisit: new Date() });
+        // When a document is created: {name} parts of the path are in e.params (onDocument from @winche/functions)
+        // export const onVisit = onDocument.created("patients/{patientId}/visits/{visitId}", async (e, ctx) => {
+        //   await documents.doc(`patients/${e.params.patientId}`).update({ lastVisit: new Date() });
         // });
 
         """;
@@ -166,7 +167,8 @@ internal static class FunctionsFolder
         }
         Write("index.ts", Example);
         Write("deno.json", Winche.Functions.FunctionsSdk.DenoJson + "\n");
-        Write(".winche/functions.ts", Winche.Functions.FunctionsSdk.Source, always: true);   // the SDK: refreshed with the CLI
+        foreach (var (file, _) in Winche.Functions.FunctionsSdk.Modules)   // the SDK: refreshed with the CLI
+            Write($".winche/{file}", Winche.Functions.FunctionsSdk.SourceOf(file), always: true);
         Write(".vscode/settings.json", "{\n  \"deno.enable\": true\n}\n");
         Write(".gitignore", $"{SecretsFile}\n");
         return made;
