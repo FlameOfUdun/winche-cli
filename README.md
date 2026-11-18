@@ -49,7 +49,7 @@ winche storage:move --bucket files --region eu-west-1 …  # move the project's 
 winche login:approve BCDF-GHJK                           # allow a CLI waiting with --no-browser, as you
 winche server settings pull                              # the server's own settings as files (server admins)
 winche indexes deploy -m "why"                           # database.indexes to the console (also diff, pull)
-winche functions init                                    # a functions/ folder: index.ts, deno.json, types for VS Code
+winche functions init                                    # a functions/ folder: index.ts, deno.json (the SDKs from npm)
 winche functions deploy -m "what changed"                # deploy it through the console, as you (or a CI token)
 winche functions secrets                                 # the secrets functions read (secrets:set NAME, secrets:remove NAME)
 winche assets init                                       # an assets/ folder, assets.rules and its tests, in winche.json
@@ -356,9 +356,8 @@ deploys the last output; `winche pages build` only builds). With `winche emulato
 watch mode: the emulator redeploys when its output changes.
 
 In a page, `import { documents } from "@winche/admin"` acts as the person who opened it (their role in the project
-limits it). The console resolves `@winche/admin` with an import map, so a bundler leaves it out: with Vite,
-`build: { rollupOptions: { external: ["@winche/admin"] } }`, and `base: "./"` (a page's files are addressed relative to
-it). Server rendering and API routes don't apply: anything that builds to static files works.
+limits it). The page brings the SDK like any dependency (bundled with it; with Vite, `base: "./"`, since a page's files
+are addressed relative to it); the console gives it only the channel the SDK finds by itself.
 
 ### Function secrets
 

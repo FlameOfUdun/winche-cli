@@ -87,9 +87,11 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "server": "https://api.example.com", "project": "demo" }""");
         var (exit, output, _) = await Run(new Recorder(), null, "functions", "init");
         Assert.Equal(0, exit);
-        foreach (var f in new[] { "index.ts", "deno.json", ".winche/functions.ts", ".vscode/settings.json" })
+        foreach (var f in new[] { "index.ts", "deno.json", ".vscode/settings.json" })
             Assert.True(File.Exists(Path.Combine(_dir, "functions", f)), f);
-        Assert.Contains("@winche/functions", File.ReadAllText(Path.Combine(_dir, "functions", "deno.json")));
+        Assert.Contains("\"@winche/functions\": \"npm:@winche/functions@^3\"", File.ReadAllText(Path.Combine(_dir, "functions", "deno.json")));
+        Assert.Contains("\"@winche/admin\": \"npm:@winche/admin@^3\"", File.ReadAllText(Path.Combine(_dir, "functions", "deno.json")));
+        Assert.False(Directory.Exists(Path.Combine(_dir, "functions", ".winche")));   // the SDKs are npm packages, not files here
         Assert.Equal("functions", JsonNode.Parse(File.ReadAllText(Path.Combine(_dir, "winche.json")))!["functions"]!.GetValue<string>());
         Assert.Contains("added \"functions\"", output);
         File.WriteAllText(Path.Combine(_dir, "functions", "notes.md"), "not code");
@@ -295,12 +297,31 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         return port;
     }
 
+    /// <summary>
+    /// The SDKs as files in the folder, named in its deno.json (as a project does before they're on npm): the built
+    /// copies the tests carry.
+    /// </summary>
+    private static void UseSdkCopies(string functions)
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "SdkPackages", "@winche");
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            var dest = Path.Combine(functions, "vendor", Path.GetRelativePath(root, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            File.Copy(file, dest, overwrite: true);
+        }
+        File.WriteAllText(Path.Combine(functions, "deno.json"), """
+            { "imports": { "@winche/functions": "./vendor/functions/dist/index.js", "@winche/admin": "./vendor/admin/dist/index.js" } }
+            """);
+    }
+
     [Fact]
     public async Task The_emulator_runs_the_functions_folder()
     {
         if (Environment.GetEnvironmentVariable("WINCHE_DENO") is not { Length: > 0 } deno) return;   // needs Deno
         await Run(new HttpClientHandler(), null, "functions", "init");
         File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "functions": "functions" }""");
+        UseSdkCopies(Path.Combine(_dir, "functions"));
         var (exit, output, err) = await Run(new HttpClientHandler(), v => v == "WINCHE_DENO" ? deno : null,
             "emulators", "exec", "--port", "0", "--pg", fx.ConnectionString, "--data", Path.Combine(_dir, "data"),
             "curl -sf -X POST \"$WINCHE_EMULATOR/functions/v1/call/hello\" -H 'Content-Type: application/json' -d '{\"data\":{\"name\":\"Ann\"}}' | grep -q 'Hello Ann' && exit 7");

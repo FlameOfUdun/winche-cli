@@ -1,0 +1,32 @@
+{
+  "name": "@winche/admin",
+  "version": "3.0.0",
+  "description": "A Winche project's data (documents, files, the app's users, assets, functions) from functions, console pages and other servers.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "license": "MIT",
+  "scripts": {
+    "build": "./build.sh",
+    "test": "./build.sh && node test/node.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FlameOfUdun/winche-admin-typescript-sdk.git"
+  }
+}

@@ -17,4 +17,8 @@
     <ProjectReference Include="..\..\src\Winche.Cli\Winche.Cli.csproj" />
     <ProjectReference Include="..\Winche.Cli.TestHost\Winche.Cli.TestHost.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The TypeScript SDKs, built (scripts/update-test-packages.sh): put in the functions folders the tests make. -->
+    <None Include="SdkPackages\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

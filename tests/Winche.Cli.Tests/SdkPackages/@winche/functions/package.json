@@ -1,0 +1,40 @@
+{
+  "name": "@winche/functions",
+  "version": "3.0.0",
+  "description": "Write Winche functions: triggers, callables, HTTP functions, schedules, console pages, secrets and resources. Data comes from @winche/admin.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FlameOfUdun/winche-functions-typescript-sdk.git"
+  },
+  "peerDependencies": {
+    "@winche/admin": "^3.0.0"
+  },
+  "devDependencies": {
+    "@winche/admin": "file:../winche-admin-typescript-sdk",
+    "typescript": "5.8.3"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json && node scripts/self-types.mjs",
+    "test": "npm run build && deno test --quiet --config test/deno.json test/"
+  }
+}

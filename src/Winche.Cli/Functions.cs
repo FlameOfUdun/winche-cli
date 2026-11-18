@@ -153,7 +153,10 @@ internal static class FunctionsFolder
 
         """;
 
-    /// <summary>Makes the folder: an example, deno.json, the SDK's types, VS Code's Deno settings. Keeps what's there.</summary>
+    /// <summary>
+    /// Makes the folder: an example, deno.json (the SDKs, @winche/functions and @winche/admin, from npm), VS Code's Deno
+    /// settings. Keeps what's there.
+    /// </summary>
     public static IReadOnlyList<string> Init(string dir)
     {
         var made = new List<string>();
@@ -167,8 +170,6 @@ internal static class FunctionsFolder
         }
         Write("index.ts", Example);
         Write("deno.json", Winche.Functions.FunctionsSdk.DenoJson + "\n");
-        foreach (var (file, _) in Winche.Functions.FunctionsSdk.Modules)   // the SDK: refreshed with the CLI
-            Write($".winche/{file}", Winche.Functions.FunctionsSdk.SourceOf(file), always: true);
         Write(".vscode/settings.json", "{\n  \"deno.enable\": true\n}\n");
         Write(".gitignore", $"{SecretsFile}\n");
         return made;

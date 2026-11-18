@@ -85,7 +85,7 @@ internal static partial class CliApp
           configure            Write lib/winche_options.dart for a Flutter or Dart app, from a Winche server
                                (--url; default the emulators)
           functions init [<dir>]
-                               Make a functions folder (default functions/): an example, deno.json, types for VS Code
+                               Make a functions folder (default functions/): an example, deno.json (@winche/functions, @winche/admin)
           functions deploy [<dir>]
                                Deploy the functions folder through the console, as you (winche login) or a CI token
           pages build          Build the console pages with a build in winche.json ("pages"; functions deploy builds them too,
