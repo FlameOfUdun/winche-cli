@@ -30,7 +30,7 @@
     "@winche-technologies/winche-admin": "^3.0.0"
   },
   "devDependencies": {
-    "@winche-technologies/winche-admin": "file:../winche-admin-typescript-sdk",
+    "@winche-technologies/winche-admin": "^3.0.0",
     "typescript": "5.8.3"
   },
   "scripts": {

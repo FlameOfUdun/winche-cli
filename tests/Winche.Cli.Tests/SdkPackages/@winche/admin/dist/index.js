@@ -1342,33 +1342,71 @@ function initializeAdmin(options) {
   const server = (options?.server ?? "").replace(/\/+$/, "");
   if (!/^https?:\/\//.test(server)) throw new WincheError("invalid-argument", "initializeAdmin: give the server's address, e.g. https://winche.example.com.");
   if (!options.project) throw new WincheError("invalid-argument", "initializeAdmin: give the project's id.");
-  if (!options.token) throw new WincheError("invalid-argument", "initializeAdmin: give a token.");
-  const url = `${server}/console/v1/projects/${encodeURIComponent(options.project)}/admin`;
+  if ([
+    options.key,
+    options.identityToken,
+    options.token
+  ].filter(Boolean).length !== 1) throw new WincheError("invalid-argument", "initializeAdmin: give one of key (a service account's), identityToken (a trusted identity's) or token.");
+  const base = `${server}/console/v1/projects/${encodeURIComponent(options.project)}`;
   const send = options.fetch ?? fetch;
-  return new Admin(async (op, args) => {
-    const token = typeof options.token === "function" ? await options.token() : options.token;
-    let response;
+  const post = async (url, body, bearer) => {
     try {
-      response = await send(url, {
+      return await send(url, {
         method: "POST",
+        body: JSON.stringify(body),
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${token}`,
-          "x-winche-protocol": String(PROTOCOL)
-        },
-        body: JSON.stringify({
-          op,
-          args
-        })
+          "x-winche-protocol": String(PROTOCOL),
+          ...bearer ? {
+            authorization: `Bearer ${bearer}`
+          } : {}
+        }
       });
     } catch (e) {
       throw new WincheError("unavailable", `Couldn't reach ${server}: ${e?.message ?? e}`);
     }
+  };
+  const failure = async (response) => {
+    const error = (await response.json().catch(() => null))?.error ?? {};
+    return new WincheError(error.code ?? (response.status === 401 ? "unauthenticated" : response.status === 403 ? "permission-denied" : "internal"), error.message ?? `The server answered ${response.status}.`);
+  };
+  let current = null;
+  let exchanging = null;
+  const exchange = async () => {
+    const body = options.key ? {
+      key: options.key
+    } : {
+      assertion: await options.identityToken()
+    };
+    const response = await post(`${base}/service-accounts/token`, body);
+    if (!response.ok) throw await failure(response);
+    const answer = await response.json();
+    current = {
+      token: answer.accessToken,
+      renewAt: Date.parse(answer.expiresAt) - 6e4
+    };
+    return current.token;
+  };
+  const accessToken = async (fresh) => {
+    if (options.token) return typeof options.token === "function" ? await options.token() : options.token;
+    if (!fresh && current && Date.now() < current.renewAt) return current.token;
+    exchanging ??= exchange().finally(() => {
+      exchanging = null;
+    });
+    return await exchanging;
+  };
+  return new Admin(async (op, args) => {
+    let response = await post(`${base}/admin`, {
+      op,
+      args
+    }, await accessToken(false));
+    if (response.status === 401 && !options.token) response = await post(`${base}/admin`, {
+      op,
+      args
+    }, await accessToken(true));
+    if (!response.ok) throw await failure(response);
     const body = await response.json().catch(() => null);
-    if (!response.ok || body?.error) {
-      const error = body?.error ?? {};
-      throw new WincheError(error.code ?? (response.status === 401 ? "unauthenticated" : response.status === 403 ? "permission-denied" : "internal"), error.message ?? `The server answered ${response.status}.`);
-    }
+    if (body?.error) throw new WincheError(body.error.code ?? "internal", body.error.message ?? "The server refused it.");
     return body?.result ?? null;
   });
 }
@@ -1379,7 +1417,7 @@ var ambient = (op, args) => {
   if (run?.call) return run.call(op, args);
   const page = g[Symbol.for("winche.page")];
   if (typeof page === "function") return page(op, args, PROTOCOL);
-  return Promise.reject(new WincheError("failed-precondition", run ? "This test gave no server: use withServer(...) from @winche/functions/testing to reach one." : "@winche/admin isn't signed in here. Functions and console pages are signed in already (call it while a function runs, not at a module's top level); anywhere else use initializeAdmin({ server, project, token })."));
+  return Promise.reject(new WincheError("failed-precondition", run ? "This test gave no server: use withServer(...) from @winche/functions/testing to reach one." : "@winche/admin isn't signed in here. Functions and console pages are signed in already (call it while a function runs, not at a module's top level); anywhere else use initializeAdmin({ server, project, key })."));
 };
 var mismatch = (server) => new WincheError("failed-precondition", `This @winche/admin speaks protocol ${PROTOCOL}; the server speaks ${server}: use the @winche/admin version made for it.`);
 var signedIn = new Admin(ambient);

@@ -11,7 +11,8 @@
  * - in functions: the server (full rights, access rules don't apply);
  * - in a console page: the person who opened it, limited by their role in the project (viewer reads, member writes
  *   data, admin does everything);
- * - anywhere else: `initializeAdmin({ server, project, token })`, limited by the token's role.
+ * - anywhere else: `initializeAdmin({ server, project, key })` (or a trusted `identityToken`), as a service account,
+ *   limited by its role.
  *
  * `as(user)` gives the same API acting as one of the app's users: every documents and files call is checked against
  * the project's access rules for them, as if the app had made it.
@@ -603,18 +604,28 @@ export declare class Admin {
      */
     as(user: AppUser): Admin;
 }
-/** How `initializeAdmin` reaches a Winche server. */
+/** How `initializeAdmin` reaches a Winche server, and who it signs in as (one of `key`, `identityToken`, `token`). */
 export interface AdminOptions {
     /** The server's address, e.g. "https://winche.example.com". */
     server: string;
     /** The project's id. */
     project: string;
-    /** A token for the project (or a function that returns the current one): its role limits what the SDK may do. */
-    token: string | (() => string | Promise<string>);
+    /**
+     * A service account's key (`wsk_…`, from the console or `winche accounts:keys:add`): exchanged for an access token,
+     * renewed before it runs out. Keep it in your server's secrets.
+     */
+    key?: string;
+    /**
+     * The current token this host's or CI job's identity provider signs about it (OpenID Connect), for a service account
+     * that trusts that identity: no key to keep. Called again whenever a new access token is needed.
+     */
+    identityToken?: () => string | Promise<string>;
+    /** An access token as it is (or a function that returns the current one), when you get it some other way. */
+    token?: string | (() => string | Promise<string>);
     /** The fetch to use (default: the global one). */
     fetch?: typeof fetch;
 }
-/** The SDK for a project on a server, from anywhere (another server, a script): calls go over HTTPS with the token. */
+/** The SDK for a project on a server, from anywhere (another server, a script): calls go over HTTPS as a service account. */
 export declare function initializeAdmin(options: AdminOptions): Admin;
 /** Documents (in functions: with the server's rights; in a page: the person's role). */
 export declare const documents: Documents;
