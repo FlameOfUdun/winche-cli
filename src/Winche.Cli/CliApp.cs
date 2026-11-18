@@ -118,9 +118,10 @@ internal static partial class CliApp
           lsp                  Run the language server for editors (the Winche VS Code extension starts it)
 
         Options:
-          --console <url>      Console URL, e.g. https://api.example.com/_console (or WINCHE_CONSOLE, or winche.json)
+          --console <url>      A project's address, e.g. https://api.example.com/projects/clinic, or a server's
+                               (or WINCHE_CONSOLE, or "server" and "project" in winche.json)
           -P, --project <name> A project from winche.json's "projects" (instead of the one picked with winche use), or
-                               a project id on the same Winche Server; configure: the project at --url/p/<id>
+                               a project id on the same Winche Server; configure: the project at --url/projects/<id>
           --token <token>      A CI token (winche tokens:create, or Project settings → CI tokens) instead of a saved sign-in (or WINCHE_TOKEN)
           --config <path>      winche.json to use (default: the nearest one upward)
           --only <list>        database, storage, assets, comma-separated (default: every file in winche.json)
