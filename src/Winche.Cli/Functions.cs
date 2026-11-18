@@ -175,7 +175,7 @@ internal static class FunctionsFolder
         return made;
     }
 
-    /// <summary>Deploys through the console (as the signed-in user or a CI token); prints the functions or the problems.</summary>
+    /// <summary>Deploys through the console (as the signed-in user or a service account); prints the functions or the problems.</summary>
     public static async Task<int> DeployAsync(ConsoleClient console, string dir, string? note, CliEnvironment env, CancellationToken ct, IReadOnlyList<BuiltPage>? pages = null)
     {
         var files = Read(dir);

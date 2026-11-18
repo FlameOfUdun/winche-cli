@@ -96,7 +96,7 @@ internal static partial class CliApp
           functions init [<dir>]
                                Make a functions folder (default functions/): an example, deno.json (@winche/functions, @winche/admin)
           functions deploy [<dir>]
-                               Deploy the functions folder through the console, as you (winche login) or a CI token
+                               Deploy the functions folder through the console, as you (winche login) or a service account
           pages build          Build the console pages with a build in winche.json ("pages"; functions deploy builds them too,
                                --no-build skips it)
           functions secrets    The secrets functions read (ctx.secrets): set or not, by whom, which functions use them

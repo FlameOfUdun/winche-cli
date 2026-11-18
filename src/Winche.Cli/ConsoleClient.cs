@@ -150,9 +150,9 @@ internal sealed class ConsoleClient(HttpClient http, Uri console, string token)
     /// <summary>Nothing more to say on a 404 (a project's area without a project is refused before the call: <see cref="ConsoleAddress.Url"/>).</summary>
     private static Task NotAProjectAsync(string path, CancellationToken ct) => Task.CompletedTask;
 
-    /// <summary>A 401: a CI token that may not do this (or was revoked, or expired), or a sign-in that has ended.</summary>
-    private CliException Refused() => token.StartsWith("wct_", StringComparison.Ordinal)
-        ? new CliException("The CI token was refused: a CI token only deploys what its scopes allow (functions, rules, indexes, assets), and stops once revoked or expired.")
+    /// <summary>A 401: a service account that may not do this (or was turned off meanwhile), or a sign-in that has ended.</summary>
+    private CliException Refused() => token.StartsWith("wsa_", StringComparison.Ordinal)
+        ? new CliException("The service account was refused: it only does what its role or scopes allow (and never manages service accounts), and stops once turned off or deleted.")
         : new CliException($"Your sign-in to {ConsoleAddress.Describe(console)} was refused: it has ended (signed out, everywhere too, or the account was turned off). Run: winche login");
 
     /// <summary>What a refusal says: its message, and its list of problems.</summary>

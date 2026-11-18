@@ -5,8 +5,8 @@ using System.Text.Json.Nodes;
 namespace Winche.Cli;
 
 /// <summary>
-/// What the console does, from the terminal: setting a server up, two-step sign-in, projects, products, CI tokens and
-/// settings files. Everything goes through the console's API, as the signed-in account (or a CI token where allowed).
+/// What the console does, from the terminal: setting a server up, two-step sign-in, projects, products, service accounts and
+/// settings files. Everything goes through the console's API, as the signed-in account (or a service account where allowed).
 /// </summary>
 internal static partial class CliApp
 {
