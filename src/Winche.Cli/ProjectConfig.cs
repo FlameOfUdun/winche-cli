@@ -40,6 +40,11 @@ internal sealed class ProjectConfig
     [JsonPropertyName("functions")] public string? Functions { get; set; }
     /// <summary>The assets folder and the channel it's published to (winche assets deploy; the emulator serves it).</summary>
     [JsonPropertyName("assets")] public AssetsConfig? Assets { get; set; }
+    /// <summary>
+    /// Console pages built from a project of their own (React, Vite, …): the folder in the functions deployment that a
+    /// consolePage's <c>files</c> names → where its project is and how it's built.
+    /// </summary>
+    [JsonPropertyName("pages")] public Dictionary<string, PageConfig>? Pages { get; set; }
 
     [JsonIgnore] public string Directory { get; private set; } = "";
     [JsonIgnore] public string? FilePath { get; private set; }
@@ -105,6 +110,17 @@ internal sealed class ProjectConfig
     {
         File.WriteAllText(path, JsonSerializer.Serialize(this, Json) + Environment.NewLine);
     }
+}
+
+/// <summary>
+/// A console page with a build: <c>"console/reports": { "source": "pages/reports" }</c> builds <c>pages/reports</c> with
+/// <c>npm run build</c> and deploys its <c>dist</c> folder as <c>console/reports</c> in the functions.
+/// </summary>
+internal sealed class PageConfig
+{
+    [JsonPropertyName("source")] public string? Source { get; set; }
+    [JsonPropertyName("build")] public string? Build { get; set; }
+    [JsonPropertyName("output")] public string? Output { get; set; }
 }
 
 /// <summary><c>"assets"</c> in winche.json: the folder published as a release, and the channel moved to it.</summary>

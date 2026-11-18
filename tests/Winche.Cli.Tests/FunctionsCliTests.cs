@@ -123,6 +123,51 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     }
 
     [Fact]
+    public async Task Pages_init_makes_a_page_project_and_deploy_builds_it_into_the_functions()
+    {
+        static string? Ci(string v) => v == "WINCHE_TOKEN" ? "wct_ci" : null;
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "server": "https://api.example.com", "project": "demo", "functions": "functions" }""");
+        await Run(new Recorder(), null, "functions", "init");
+        var (exit, output, _) = await Run(new Recorder(), null, "pages", "init", "pages/reports");
+        Assert.Equal(0, exit);
+        foreach (var f in new[] { "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/App.tsx", ".winche/console-page/index.ts", ".winche/console-page/react.ts" })
+            Assert.True(File.Exists(Path.Combine(_dir, "pages", "reports", f)), f);
+        Assert.Contains("base: \"./\"", File.ReadAllText(Path.Combine(_dir, "pages", "reports", "vite.config.ts")));
+        Assert.Equal("pages/reports", JsonNode.Parse(File.ReadAllText(Path.Combine(_dir, "winche.json")))!["pages"]!["console/reports"]!["source"]!.GetValue<string>());
+        Assert.Contains("consolePage({ title: \"Reports\", files: \"console/reports\" })", output);
+
+        // A stand-in build (no npm here): its output replaces whatever the functions folder had for the page.
+        var config = JsonNode.Parse(File.ReadAllText(Path.Combine(_dir, "winche.json")))!;
+        config["pages"]!["console/reports"]!["build"] = "mkdir -p out/assets && printf '<html><head></head></html>' > out/index.html && printf 'x' > out/assets/app.js && printf 'n' > out/assets/notes.md";
+        config["pages"]!["console/reports"]!["output"] = "out";
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), config.ToJsonString());
+        Directory.CreateDirectory(Path.Combine(_dir, "functions", "console", "reports"));
+        File.WriteAllText(Path.Combine(_dir, "functions", "console", "reports", "old.html"), "stale");
+        File.Delete(Path.Combine(_dir, "pages", "reports", ".winche", "console-page", "react.ts"));
+        var console = new Recorder();
+        (exit, output, var deployErr) = await Run(console, Ci, "functions", "deploy");
+        Assert.True(exit == 0, deployErr);
+        Assert.Contains("Building console/reports", output);
+        var files = JsonNode.Parse(console.Body!)!["files"]!.AsObject();
+        Assert.Equal("<html><head></head></html>", files["console/reports/index.html"]!.GetValue<string>());
+        Assert.Equal("x", files["console/reports/assets/app.js"]!.GetValue<string>());
+        Assert.False(files.ContainsKey("console/reports/assets/notes.md"));   // not a page file
+        Assert.False(files.ContainsKey("console/reports/old.html"));
+        Assert.True(File.Exists(Path.Combine(_dir, "pages", "reports", ".winche", "console-page", "react.ts")));   // refreshed at every build
+
+        // A failing build deploys nothing; --no-build deploys the last output.
+        config["pages"]!["console/reports"]!["build"] = "echo broken >&2; exit 3";
+        File.WriteAllText(Path.Combine(_dir, "winche.json"), config.ToJsonString());
+        console = new Recorder();
+        var (failed, _, err) = await Run(console, Ci, "functions", "deploy");
+        Assert.Equal(1, failed);
+        Assert.Contains("the build failed", err);
+        Assert.Null(console.Request);
+        Assert.Equal(0, (await Run(console, Ci, "functions", "deploy", "--no-build")).Exit);
+        Assert.Contains("console/reports/index.html", console.Body);
+    }
+
+    [Fact]
     public async Task Login_to_a_console_with_its_own_accounts_is_allowed_in_the_browser_then_deploy_and_logout()
     {
         File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "server": "https://api.example.com", "project": "demo", "functions": "functions" }""");

@@ -88,6 +88,9 @@ internal static partial class CliApp
                                Make a functions folder (default functions/): an example, deno.json, types for VS Code
           functions deploy [<dir>]
                                Deploy the functions folder through the console, as you (winche login) or a CI token
+          pages init <dir>     Make a console page project in <dir> (Vite + React + TypeScript, with @winche/console-page) and
+                               add it to winche.json's "pages" (--folder: the consolePage's files, default console/<dir's name>)
+          pages build          Build the pages in winche.json (functions deploy builds them too; --no-build skips it)
           functions secrets    The secrets functions read (ctx.secrets): set or not, by whom, which functions use them
           functions secrets:set <NAME>
                                Add or replace one (the value from WINCHE_SECRET, --from-file <path>, or typed unseen;
@@ -161,7 +164,7 @@ internal static partial class CliApp
 
             using var http = new HttpClient(env.Http, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(60) };
             var command = string.Join(' ', a.Positional.Take(
-                a.Positional[0] is "rules" or "emulators" or "functions" or "indexes" or "settings" or "2fa" or "assets" ? 2
+                a.Positional[0] is "rules" or "emulators" or "functions" or "indexes" or "settings" or "2fa" or "assets" or "pages" ? 2
                 : a.Positional[0] == "server" ? (a.Positional.ElementAtOrDefault(1) == "settings" ? 3 : 2) : 1));
             string? Arg(int i) => a.Positional.ElementAtOrDefault(i);
             var run = new Run(env, a, http);
@@ -234,6 +237,8 @@ internal static partial class CliApp
                 "functions secrets" => await run.FunctionSecretsAsync(ct),
                 "functions secrets:set" => await run.FunctionSecretSetAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:set <NAME> [--from-file <path>]", 2), ct),
                 "functions secrets:remove" => await run.FunctionSecretRemoveAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:remove <NAME>", 2), ct),
+                "pages init" => run.PagesInit(Arg(2) ?? throw new CliException("Usage: winche pages init <dir> [--folder console/<name>] [--title <title>]", 2)),
+                "pages build" => await run.PagesBuildAsync(ct),
                 "assets init" => run.AssetsInit(Arg(2)),
                 "assets deploy" => await run.AssetsDeployAsync(Arg(2), ct),
                 "assets diff" => await run.AssetsDiffAsync(Arg(2), ct),
@@ -455,6 +460,40 @@ internal static partial class CliApp
         private string FunctionsDir(string? given) => given is not null ? Path.GetFullPath(given, env.WorkingDirectory)
             : Config?.FunctionsPath ?? Path.Combine(Config?.Directory ?? env.WorkingDirectory, "functions");
 
+        public int PagesInit(string dir)
+        {
+            var config = Config ?? throw new CliException("There's no winche.json here: run winche init first.");
+            var target = Path.GetFullPath(dir, env.WorkingDirectory);
+            var name = Path.GetFileName(target.TrimEnd(Path.DirectorySeparatorChar));
+            var folder = args.Value("folder") ?? $"console/{name}";
+            var title = args.Value("title") ?? (name.Length == 0 ? "Page" : char.ToUpperInvariant(name[0]) + name[1..]);
+            foreach (var f in PageBuilds.Init(target, title)) env.Out.WriteLine($"  wrote {Path.GetRelativePath(env.WorkingDirectory, Path.Combine(target, f))}");
+            var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(config.FilePath!))!.AsObject();
+            var pages = json["pages"] as System.Text.Json.Nodes.JsonObject ?? (System.Text.Json.Nodes.JsonObject)(json["pages"] = new System.Text.Json.Nodes.JsonObject());
+            if (!pages.ContainsKey(folder))
+            {
+                pages[folder] = new System.Text.Json.Nodes.JsonObject { ["source"] = Path.GetRelativePath(config.Directory, target).Replace('\\', '/') };
+                File.WriteAllText(config.FilePath!, json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+                env.Out.WriteLine($"  added pages.\"{folder}\" to {Path.GetFileName(config.FilePath!)}");
+            }
+            var compact = string.Concat(title.Where(char.IsLetterOrDigit));
+            var export = (compact.Length == 0 ? "page" : char.ToLowerInvariant(compact[0]) + compact[1..]) + "Page";
+            env.Out.WriteLine("The page is ready. Next:");
+            env.Out.WriteLine($"  1. npm install (in {Path.GetRelativePath(env.WorkingDirectory, target)})");
+            env.Out.WriteLine($"  2. In the functions: export const {export} = consolePage({{ title: \"{title}\", files: \"{folder}\" }});");
+            env.Out.WriteLine("     and its actions with consoleAction(...)");
+            env.Out.WriteLine("  3. winche functions deploy (builds the page, then deploys it with the functions)");
+            env.Out.WriteLine("While working: npm run watch, with winche emulators start (it redeploys when the build changes).");
+            return 0;
+        }
+
+        public async Task<int> PagesBuildAsync(CancellationToken ct)
+        {
+            var pages = PageBuilds.Of(Config);
+            if (pages.Count == 0) { env.Out.WriteLine("There are no pages in winche.json (winche pages init <dir> makes one)."); return 0; }
+            return await PageBuilds.BuildAsync(pages, env, ct) ? 0 : 1;
+        }
+
         public int FunctionsInit(string? dir)
         {
             var target = FunctionsDir(dir);
@@ -646,7 +685,9 @@ internal static partial class CliApp
         {
             var folder = FunctionsDir(dir);
             var client = await ClientAsync(ct);
-            return await FunctionsFolder.DeployAsync(client, folder, args.Value("message"), env, ct);
+            var pages = PageBuilds.Of(Config);
+            if (!args.Flag("no-build") && !await PageBuilds.BuildAsync(pages, env, ct)) return 1;
+            return await FunctionsFolder.DeployAsync(client, folder, args.Value("message"), env, ct, pages);
         }
 
         public async Task<int> EmulatorsAsync(string? command, CancellationToken ct)
@@ -668,6 +709,7 @@ internal static partial class CliApp
                 Assets = AssetsDir(null) is var adir && Directory.Exists(adir) ? adir : null,
                 AssetsChannel = AssetsChannel(),
                 Functions = FunctionsDir(null) is var fdir && Directory.Exists(fdir) ? fdir : null,
+                Pages = PageBuilds.Of(config),
                 Quiet = args.Flag("quiet") || command is not null,
                 Verbose = args.Flag("verbose"),
                 ProjectId = config?.ProjectId ?? "demo",
@@ -1228,9 +1270,9 @@ internal static partial class CliApp
 /// <summary>Positional words plus <c>--name value</c> / <c>--flag</c> options.</summary>
 internal sealed class Args
 {
-    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose", "reauth", "no-browser",
+    private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose", "reauth", "no-browser", "no-build",
         "rotate", "path-style", "finish", "cancel", "keep-old", "follow"];
-    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
+    private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "folder", "title", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
         "role", "sdk", "android-package", "apple-bundle-id", "web-origin",
         "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel",

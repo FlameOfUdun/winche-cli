@@ -49,6 +49,8 @@ internal sealed record EmulatorOptions
     public bool Verbose { get; init; }
     /// <summary>A functions folder to deploy at start and again whenever it's saved.</summary>
     public string? Functions { get; init; }
+    /// <summary>Console pages built from their own projects: their build output is deployed with the functions.</summary>
+    public IReadOnlyList<BuiltPage> Pages { get; init; } = [];
     /// <summary>The deno program for functions.</summary>
     public string? DenoPath { get; init; }
     /// <summary>The project id apps see in /.well-known/winche.</summary>
@@ -253,7 +255,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         host.Watch(options.StorageRules, WincheStorageKeys.RULE_ENGINE_KEY);
         host.Watch(options.AssetsRules, AssetsServiceCollectionExtensions.RulesKey);
         if (options.Assets is { } assets) await host.WatchAssetsAsync(assets, options.AssetsChannel);
-        if (options.Functions is { } folder) await host.WatchFunctionsAsync(folder, ct);
+        if (options.Functions is { } folder) await host.WatchFunctionsAsync(folder, options.Pages, ct);
         return host;
     }
 
@@ -317,7 +319,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
     }
 
     /// <summary>Deploys the functions folder now and whenever a file in it is saved; a broken save leaves the last good version running.</summary>
-    private async Task WatchFunctionsAsync(string folder, CancellationToken ct)
+    private async Task WatchFunctionsAsync(string folder, IReadOnlyList<BuiltPage> pages, CancellationToken ct)
     {
         var functions = _app.Services.GetRequiredService<Winche.Functions.WincheFunctions>();
         var name = Path.GetFileName(folder);
@@ -329,6 +331,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
             try
             {
                 var files = FunctionsFolder.Read(folder);
+                PageBuilds.AddTo(files, pages);
                 var resources = FunctionsFolder.HashResources(folder);
                 var fingerprint = System.Text.Json.JsonSerializer.Serialize(new { files, resources = resources.ToDictionary(a => a.Key, a => a.Value.Entry.Hash) });
                 if (fingerprint == last) return;
@@ -371,6 +374,18 @@ internal sealed class EmulatorHost : IAsyncDisposable
         watcher.Renamed += (s, e) => Changed(s, e);
         watcher.EnableRaisingEvents = true;
         _watchers.Add(watcher);
+        // Pages built from their own projects: their output (e.g. npm run watch) is deployed as it changes.
+        foreach (var page in pages)
+        {
+            Directory.CreateDirectory(page.OutputPath);
+            var built = new FileSystemWatcher(page.OutputPath) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size };
+            built.Changed += Changed;
+            built.Created += Changed;
+            built.Deleted += Changed;
+            built.Renamed += (s, e) => Changed(s, e);
+            built.EnableRaisingEvents = true;
+            _watchers.Add(built);
+        }
     }
 
     /// <summary>

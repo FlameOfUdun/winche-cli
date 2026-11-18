@@ -173,9 +173,10 @@ internal static class FunctionsFolder
     }
 
     /// <summary>Deploys through the console (as the signed-in user or a CI token); prints the functions or the problems.</summary>
-    public static async Task<int> DeployAsync(ConsoleClient console, string dir, string? note, CliEnvironment env, CancellationToken ct)
+    public static async Task<int> DeployAsync(ConsoleClient console, string dir, string? note, CliEnvironment env, CancellationToken ct, IReadOnlyList<BuiltPage>? pages = null)
     {
         var files = Read(dir);
+        PageBuilds.AddTo(files, pages ?? []);
         var resources = HashResources(dir);
         if (resources.Count > 0)
         {
