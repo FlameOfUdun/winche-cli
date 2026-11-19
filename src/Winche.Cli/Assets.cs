@@ -8,12 +8,38 @@ internal static class AssetsFolder
 {
     public const string DefaultFolder = "assets", DefaultChannel = "production";
 
-    public sealed record Entry(string Path, string File, string Hash, long Size);
+    /// <summary>A file to publish: from the folder (<see cref="File"/>), or kept on a CDN (<see cref="Url"/>, nothing uploaded).</summary>
+    public sealed record Entry(string Path, string? File, string Hash, long Size, string? Url = null);
+
+    /// <summary>
+    /// The files kept on a CDN, from <paramref name="file"/> (<c>{ "files": { "videos/a.mp4": "https://cdn…/a.mp4" } }</c>):
+    /// path → address, or none when there's no such file.
+    /// </summary>
+    public static Dictionary<string, string> ReadCdn(string file)
+    {
+        if (!File.Exists(file)) return new(StringComparer.Ordinal);
+        JsonNode? doc;
+        try { doc = JsonNode.Parse(File.ReadAllText(file), documentOptions: new() { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true }); }
+        catch (System.Text.Json.JsonException ex) { throw new CliException($"{System.IO.Path.GetFileName(file)} isn't JSON: {ex.Message}"); }
+        if (doc?["files"] is not JsonObject files) throw new CliException($"{System.IO.Path.GetFileName(file)} needs \"files\": {{ \"<path>\": \"<address on the CDN>\" }}.");
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (path, url) in files)
+        {
+            if (url?.GetValueKind() != System.Text.Json.JsonValueKind.String || !Uri.TryCreate(url.GetValue<string>(), UriKind.Absolute, out var u) || u.Scheme != "https")
+                throw new CliException($"{System.IO.Path.GetFileName(file)}: {path} needs an https:// address.");
+            map[path.Trim('/')] = url.GetValue<string>();
+        }
+        return map;
+    }
 
     /// <summary>Every file under <paramref name="dir"/> (path inside it → file), sorted, hidden ones and folders skipped.</summary>
-    public static List<Entry> Read(string dir)
+    public static List<Entry> Read(string dir, bool emptyOk = false)
     {
-        if (!Directory.Exists(dir)) throw new CliException($"There's no folder {dir}. Run: winche assets init");
+        if (!Directory.Exists(dir))
+        {
+            if (emptyOk) return [];
+            throw new CliException($"There's no folder {dir}. Run: winche assets init");
+        }
         var list = new List<Entry>();
         foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
         {
@@ -22,7 +48,7 @@ internal static class AssetsFolder
             using var stream = File.OpenRead(file);
             list.Add(new Entry(rel, file, Convert.ToHexStringLower(SHA256.HashData(stream)), stream.Length));
         }
-        if (list.Count == 0) throw new CliException($"{dir} has no files to publish.");
+        if (list.Count == 0 && !emptyOk) throw new CliException($"{dir} has no files to publish.");
         return [.. list.OrderBy(e => e.Path, StringComparer.Ordinal)];
     }
 
@@ -55,6 +81,31 @@ internal static partial class CliApp
             : Config?.AssetsPath ?? Path.Combine(Config?.Directory ?? env.WorkingDirectory, AssetsFolder.DefaultFolder);
 
         private string AssetsChannel() => args.Value("channel") ?? Config?.Assets?.Channel ?? AssetsFolder.DefaultChannel;
+
+        /// <summary>
+        /// What a release would have: the folder's files, and those in assets.cdn.json (their hash and size read by the
+        /// server through a signed link; it reads each new or changed one once).
+        /// </summary>
+        private async Task<List<AssetsFolder.Entry>> AssetsEntriesAsync(ConsoleClient client, string folder, CancellationToken ct)
+        {
+            var cdn = AssetsFolder.ReadCdn(Config?.AssetsCdnPath ?? Path.Combine(env.WorkingDirectory, "assets.cdn.json"));
+            var local = AssetsFolder.Read(folder, emptyOk: cdn.Count > 0);
+            if (cdn.Count == 0) return local;
+            if (local.FirstOrDefault(e => cdn.ContainsKey(e.Path)) is { } both) throw new CliException($"{both.Path} is in the folder and on the CDN: keep one.");
+            env.Out.WriteLine($"Reading {cdn.Count} file{(cdn.Count == 1 ? "" : "s")} on the CDN…");
+            var (ok, answer) = await client.PostAsync("assets/cdn/files", new { urls = cdn.Values.Distinct() }, "assets", ct);
+            if (!ok) throw new CliException($"The CDN files couldn't be read: {Message(answer, "the console refused.")}");
+            var seen = (answer["files"] as JsonArray ?? []).ToDictionary(f => f!["url"]!.GetValue<string>(), f => f!, StringComparer.Ordinal);
+            var problems = cdn.Where(c => !seen.TryGetValue(c.Value, out var f) || f["error"]?.GetValue<string>() is not null)
+                .Select(c => $"  {c.Key}: {(seen.TryGetValue(c.Value, out var f) ? f["error"]!.GetValue<string>() : "not read")}").ToList();
+            if (problems.Count > 0)
+            {
+                foreach (var p in problems.Take(30)) env.Error.WriteLine(p);
+                throw new CliException("Some files on the CDN can't be used.");
+            }
+            return [.. local.Concat(cdn.Select(c => new AssetsFolder.Entry(c.Key, null, seen[c.Value]["hash"]!.GetValue<string>(), seen[c.Value]["size"]!.GetValue<long>(), c.Value)))
+                .OrderBy(e => e.Path, StringComparer.Ordinal)];
+        }
 
         private static string Message(JsonObject body, string otherwise) =>
             body["error"]?["message"]?.GetValue<string>() ?? body["error"]?.ToString() ?? otherwise;
@@ -121,8 +172,8 @@ internal static partial class CliApp
         {
             var folder = AssetsDir(dir);
             var channel = AssetsChannel();
-            var local = AssetsFolder.Read(folder);
             var client = await ClientAsync(ct);
+            var local = await AssetsEntriesAsync(client, folder, ct);
             var current = await ChannelFilesAsync(client, channel, ct);
             var changes = AssetsFolder.Compare(local, current?.Files ?? new Dictionary<string, string>());
             var same = current is not null && changes.Added.Count + changes.Changed.Count + changes.Removed.Count == 0;
@@ -135,10 +186,10 @@ internal static partial class CliApp
             if (args.Flag("dry-run")) { env.Out.WriteLine("Dry run: nothing published."); return 0; }
 
             // Only the contents the server doesn't have are sent; the rest are named by hash.
-            var (asked, answer) = await client.PostAsync("assets/contents/missing", new { hashes = local.Select(e => e.Hash).Distinct() }, "assets", ct);
+            var (asked, answer) = await client.PostAsync("assets/contents/missing", new { hashes = local.Where(e => e.File is not null).Select(e => e.Hash).Distinct() }, "assets", ct);
             if (!asked) { env.Error.WriteLine($"Not published: {Message(answer, "the console refused the contents.")}"); return 1; }
             var missing = (answer["missing"] as JsonArray ?? []).Select(h => h!.GetValue<string>()).ToHashSet();
-            var sending = local.Where(e => missing.Remove(e.Hash)).ToList();
+            var sending = local.Where(e => e.File is not null && missing.Remove(e.Hash)).ToList();
             if (sending.Count > 0)
             {
                 env.Out.WriteLine($"Sending {sending.Count} new file{(sending.Count == 1 ? "" : "s")} ({AssetsFolder.Size(sending.Sum(e => e.Size))})…");
@@ -146,7 +197,7 @@ internal static partial class CliApp
                 var uploads = client.Through(slow);
                 foreach (var e in sending)
                 {
-                    var (sent, refusal) = await uploads.PutFileAsync($"assets/contents/{e.Hash}", e.File, "assets", ct);
+                    var (sent, refusal) = await uploads.PutFileAsync($"assets/contents/{e.Hash}", e.File!, "assets", ct);
                     if (!sent) { env.Error.WriteLine($"Not published: {e.Path}: {Message(refusal, "the console refused it.")}"); return 1; }
                 }
             }
@@ -154,18 +205,21 @@ internal static partial class CliApp
             var (ok, body) = await client.PostAsync("assets/releases", new
             {
                 note, channel,
-                files = local.ToDictionary(e => e.Path, e => new { hash = e.Hash, size = e.Size, mimeType = "" }),
+                files = local.ToDictionary(e => e.Path, e => new { hash = e.Hash, size = e.Size, mimeType = "", url = e.Url }),
             }, "assets", ct);
             if (!ok) { env.Error.WriteLine($"Not published: {Message(body, "the console refused it.")}"); Problems(body); return 1; }
-            env.Out.WriteLine($"Published release #{body["number"]} ({local.Count} file{(local.Count == 1 ? "" : "s")}, {AssetsFolder.Size(local.Sum(e => e.Size))}); {channel} points at it.");
+            var onCdn = local.Count(e => e.Url is not null);
+            env.Out.WriteLine($"Published release #{body["number"]} ({local.Count} file{(local.Count == 1 ? "" : "s")}, {AssetsFolder.Size(local.Sum(e => e.Size))}"
+                + $"{(onCdn > 0 ? $"; {onCdn} on the CDN" : "")}); {channel} points at it.");
             return 0;
         }
 
         public async Task<int> AssetsDiffAsync(string? dir, CancellationToken ct)
         {
             var channel = AssetsChannel();
-            var local = AssetsFolder.Read(AssetsDir(dir));
-            var current = await ChannelFilesAsync(await ClientAsync(ct), channel, ct);
+            var client = await ClientAsync(ct);
+            var local = await AssetsEntriesAsync(client, AssetsDir(dir), ct);
+            var current = await ChannelFilesAsync(client, channel, ct);
             if (current is null) { env.Out.WriteLine($"There's no channel {channel} yet: deploying makes it, with {local.Count} files."); return 0; }
             var changes = AssetsFolder.Compare(local, current.Value.Files);
             if (changes.Added.Count + changes.Changed.Count + changes.Removed.Count == 0) { env.Out.WriteLine($"No changes from {channel} (release #{current.Value.Release})."); return 0; }

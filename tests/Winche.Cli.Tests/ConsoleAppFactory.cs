@@ -4,7 +4,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 namespace Winche.Cli.Tests;
 
 /// <summary>Boots the test host: a console with its own accounts, the rules editors, indexes and the CLI's tokens.</summary>
-public sealed class ConsoleAppFactory(PostgresFixture fx) : WebApplicationFactory<global::Program>
+public sealed class ConsoleAppFactory(PostgresFixture fx, Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? services = null)
+    : WebApplicationFactory<global::Program>
 {
     private string? _admin;
 
@@ -16,5 +17,6 @@ public sealed class ConsoleAppFactory(PostgresFixture fx) : WebApplicationFactor
         builder.UseEnvironment("Testing");
         builder.UseSetting("Winche:ConnectionString", fx.ConnectionString);
         builder.UseSetting("Console:ConnectionString", fx.ConsoleConnectionString);
+        if (services is not null) Microsoft.AspNetCore.TestHost.WebHostBuilderExtensions.ConfigureTestServices(builder, services);
     }
 }

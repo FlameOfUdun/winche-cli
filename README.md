@@ -416,6 +416,18 @@ Deploy hashes every file and sends only what the server doesn't have, streamed, 
 the releases using it. A folder that's what the channel already has publishes nothing (`--force` makes a new release
 anyway). CI deploys as a service account scoped to `assets` (`winche accounts:create ci --scopes assets,rules`).
 
+**Files on a CDN.** Large files can stay on a CDN that signs links (CloudFront: set it up in the console's Assets →
+Settings → CDNs). List them in `assets.cdn.json` beside `winche.json` (or `"cdn"` in winche.json's `assets`), path →
+address:
+
+```json
+{ "files": { "videos/adult/bvm.mp4": "https://cdn.example.com/app/adult/bvm.mp4" } }
+```
+
+`winche assets deploy` publishes them with the folder, uploading nothing for them: the server reads each new or changed
+one once through a signed link for its hash. Apps never see the addresses; each read is the rules, then a link the CDN
+takes for a few minutes. Give a replaced file a new address: a release names its content by hash.
+
 ## Emulators
 
 `winche emulators start` runs Winche.Database (REST and the live WebSocket), Winche.Storage, Winche Auth, functions and

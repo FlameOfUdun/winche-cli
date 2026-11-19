@@ -101,6 +101,8 @@ internal sealed class ProjectConfig
     /// <summary>The assets folder, when winche.json names one.</summary>
     [JsonIgnore] public string? AssetsPath => Assets?.Folder is { } f ? Path.GetFullPath(f, Directory) : null;
 
+    [JsonIgnore] public string AssetsCdnPath => Path.GetFullPath(Assets?.Cdn ?? "assets.cdn.json", Directory);
+
     [JsonIgnore] public string IndexesPath => Path.GetFullPath(Indexes ?? "database.indexes", Directory);
 
     public string? TestsPath(string subsystem) =>
@@ -128,6 +130,8 @@ internal sealed class AssetsConfig
 {
     [JsonPropertyName("folder")] public string? Folder { get; set; }
     [JsonPropertyName("channel")] public string? Channel { get; set; }
+    /// <summary>The files kept on a CDN (path → address), published by address: default assets.cdn.json beside winche.json.</summary>
+    [JsonPropertyName("cdn")] public string? Cdn { get; set; }
 }
 
 /// <summary>Which console a command talks to, and the project alias it came from (if any).</summary>

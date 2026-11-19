@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using Winche.Cli.Emulator;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Winche.Cli.Tests;
@@ -148,5 +149,67 @@ public sealed class AssetsCliTests(PostgresFixture fx) : IDisposable
         for (var i = 0; i < 50 && !log.ToString().Contains("↻ assets"); i++) await Task.Delay(100);
         Assert.Contains("↻ assets", log.ToString());
         Assert.Equal("{\"hello\":\"Hi\"}", await app.GetStringAsync($"/assets/v1/channels/{_channel}/files/translations/en.json"));
+    }
+
+    /// <summary>A CloudFront stand-in: files served only to links signed with its key pair (canned policy, not expired).</summary>
+    private sealed class FakeCloudFront(System.Security.Cryptography.RSA key) : HttpMessageHandler
+    {
+        public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
+        public int Gets;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var uri = request.RequestUri!;
+            var q = System.Web.HttpUtility.ParseQueryString(uri.Query);
+            var at = uri.GetLeftPart(UriPartial.Path);
+            var ok = q["Key-Pair-Id"] == "K2KEY" && long.TryParse(q["Expires"], out var epoch) && q["Signature"] is { } sig
+                && key.VerifyData(System.Text.Encoding.UTF8.GetBytes("{\"Statement\":[{\"Resource\":\"" + at + "\",\"Condition\":{\"DateLessThan\":{\"AWS:EpochTime\":" + epoch + "}}}]}"),
+                    Convert.FromBase64String(sig.Replace('-', '+').Replace('_', '=').Replace('~', '/')),
+                    System.Security.Cryptography.HashAlgorithmName.SHA1, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+            if (!ok) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden));
+            if (!Files.TryGetValue(at, out var bytes)) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            if (request.Method == HttpMethod.Get) Interlocked.Increment(ref Gets);
+            var r = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(request.Method == HttpMethod.Head ? [] : bytes) };
+            r.Headers.ETag = new EntityTagHeaderValue("\"v1\"");
+            return Task.FromResult(r);
+        }
+    }
+
+    [Fact]
+    public async Task Files_on_a_cdn_are_published_by_address_with_the_folder_and_read_once()
+    {
+        using var key = System.Security.Cryptography.RSA.Create(2048);
+        var cdn = new FakeCloudFront(key);
+        cdn.Files["https://cdn.example.com/app/bvm.mp4"] = "the video"u8.ToArray();
+        var media = new Winche.Assets.AssetCdn { Id = "media", BaseUrl = "https://cdn.example.com/app/", KeyPairId = "K2KEY" };
+        var pem = key.ExportPkcs8PrivateKeyPem();
+        _app = new ConsoleAppFactory(fx, s =>
+        {
+            s.AddSingleton(new Winche.Assets.AssetCdnHttp(new HttpClient(cdn)));
+            s.AddSingleton(sp => new Winche.Assets.AssetCdnSigner(null, [(media, pem)], sp, TimeProvider.System));
+        });
+        Write("winche.json", $$"""{ "server": "http://localhost", "project": "demo", "rules": {}, "assets": { "folder": "assets" } }""");
+        Write("assets/translations/en.json", "{}");
+        Write("assets.cdn.json", """{ "files": { "videos/bvm.mp4": "https://cdn.example.com/app/bvm.mp4" } }""");
+
+        var first = await Admin("assets", "deploy", "--channel", _channel, "-m", "Videos on the CDN");
+        Assert.True(first.Exit == 0, first.All);
+        Assert.Contains("Reading 1 file on the CDN", first.Out);
+        Assert.Contains("Sending 1 new file", first.Out);   // the translation; nothing for the video
+        Assert.Matches($"Published release #\\d+ \\(2 files, .*; 1 on the CDN\\); {_channel} points at it", first.Out);
+
+        // Unchanged on the CDN (same ETag): not read again, nothing to publish.
+        var again = await Admin("assets", "deploy", "--channel", _channel, "-m", "Again");
+        Assert.True(again.Exit == 0, again.All);
+        Assert.Contains("Nothing to publish", again.Out);
+        Assert.Equal(1, cdn.Gets);
+
+        // An address no CDN serves, or a path in both places: refused before anything is published.
+        Write("assets.cdn.json", """{ "files": { "videos/x.mp4": "https://elsewhere.example.com/x.mp4" } }""");
+        var elsewhere = await Admin("assets", "deploy", "--channel", _channel, "-m", "Elsewhere");
+        Assert.NotEqual(0, elsewhere.Exit);
+        Assert.Contains("videos/x.mp4: No CDN set up", elsewhere.Err);
+        Write("assets.cdn.json", """{ "files": { "translations/en.json": "https://cdn.example.com/app/bvm.mp4" } }""");
+        Assert.Contains("is in the folder and on the CDN", (await Admin("assets", "deploy", "--channel", _channel, "-m", "Both")).Err);
     }
 }

@@ -109,7 +109,8 @@ internal static partial class CliApp
           assets deploy [<dir>]
                                Publish the assets folder as a new release and move its channel to it (--channel, default
                                winche.json's or production; -m: the note; --dry-run; --force: publish even if unchanged).
-                               Only contents the server doesn't have are sent.
+                               Only contents the server doesn't have are sent. Files kept on a CDN, listed in
+                               assets.cdn.json ({ "files": { "<path>": "https://…" } }), are published by address.
           assets diff [<dir>]  How the folder differs from the channel's release
           assets releases      The releases, newest first
           assets release <n>   A release's files
