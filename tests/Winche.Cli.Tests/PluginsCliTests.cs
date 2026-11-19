@@ -27,6 +27,7 @@ public class PluginsCliTests : IDisposable
                                     "settings": { "FROM": "+44" }, "functions": ["sms.send"], "secretsNeeded": ["SMS__AUTH_TOKEN"] }] }
                     """),
                 ("POST", "/console/v1/projects/demo/functions/plugins") => (HttpStatusCode.OK, """{ "version": 3, "note": "Installed alerts (text-plugin 1.1.0)" }"""),
+                ("PUT", "/console/v1/projects/demo/functions/plugins/sms") => (HttpStatusCode.OK, """{ "version": 5, "note": "Changed sms's settings" }"""),
                 ("DELETE", "/console/v1/projects/demo/functions/plugins/sms?secrets=remove") => (HttpStatusCode.OK, """{ "version": 4, "note": "Removed sms (text-plugin)" }"""),
                 ("POST", "/console/v1/projects/demo/functions/deploy") => (HttpStatusCode.OK, """{ "version": 5, "functions": [{ "name": "alerts.send" }] }"""),
                 _ => (HttpStatusCode.NotFound, "{}"),
@@ -65,6 +66,11 @@ public class PluginsCliTests : IDisposable
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""{ "FROM": "+1", "RETRIES": 2, "LOUD": true }"""), sent["settings"]), sent["settings"]!.ToJsonString());
         Assert.Equal(("@acme/x", "2.0.0"), CliApp.Run.Spec("@acme/x@2.0.0"));
         Assert.Equal(("@acme/x", null), CliApp.Run.Spec("@acme/x"));
+
+        // configure changes what it's given; the other settings keep their values.
+        (exit, _, _) = await Run(console, null, "plugins:configure", "sms", "--set", "QUEUE=texts");
+        Assert.Equal(0, exit);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""{ "FROM": "+44", "QUEUE": "texts" }"""), JsonNode.Parse(console.Requests.Last().Body!)!["settings"]), console.Requests.Last().Body);
 
         (exit, output, _) = await Run(console, null, "plugins:uninstall", "sms", "--remove-secrets");
         Assert.Equal((0, "Functions version 4: Removed sms (text-plugin)."), (exit, output.Trim()));

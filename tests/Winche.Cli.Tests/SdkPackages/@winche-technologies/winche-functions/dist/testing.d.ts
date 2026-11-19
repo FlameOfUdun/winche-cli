@@ -30,4 +30,5 @@ export declare function withServer<R>(server: AdminOptions | Call, fn: () => R |
 export declare function testContext(options?: {
     name?: string;
     caller?: Caller | null;
+    byServer?: boolean;
 }): Context;

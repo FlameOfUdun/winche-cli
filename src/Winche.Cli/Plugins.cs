@@ -89,8 +89,19 @@ internal static partial class CliApp
             return await SendPluginAsync(HttpMethod.Post, "functions/plugins", new { id, package = name, version, settings = SetOptions() }, $"Not installed", ct);
         }
 
-        public Task<int> PluginConfigureAsync(string id, CancellationToken ct) =>
-            SendPluginAsync(HttpMethod.Put, $"functions/plugins/{Uri.EscapeDataString(id)}", new { settings = SetOptions() }, "Not changed", ct);
+        /// <summary>Changes the settings given with --set; the others keep their values.</summary>
+        public async Task<int> PluginConfigureAsync(string id, CancellationToken ct)
+        {
+            var changes = SetOptions();
+            if (changes.Count == 0) throw new CliException("Say what to change: --set KEY=value.", 2);
+            var client = await ClientAsync(ct);
+            var installed = ((await client.GetJsonAsync("functions/plugins?updates=false", ct))["plugins"] as JsonArray ?? []).OfType<JsonObject>()
+                .FirstOrDefault(p => p["id"]?.ToString() == id) ?? throw new CliException($"There's no plugin installed as {id}. See: winche plugins");
+            var settings = new Dictionary<string, JsonNode?>(StringComparer.Ordinal);
+            foreach (var (k, v) in installed["settings"] as JsonObject ?? []) if (v is not null) settings[k] = v.DeepClone();
+            foreach (var (k, v) in changes) settings[k] = v;
+            return await SendPluginAsync(HttpMethod.Put, $"functions/plugins/{Uri.EscapeDataString(id)}", new { settings }, "Not changed", ct);
+        }
 
         public Task<int> PluginUpgradeAsync(string spec, CancellationToken ct)
         {
