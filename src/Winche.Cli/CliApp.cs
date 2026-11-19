@@ -105,6 +105,16 @@ internal static partial class CliApp
                                or --ref aws-ssm:/app/key: read from AWS when functions run)
           functions secrets:remove <NAME>
                                Remove one
+          plugins              The plugins installed (packages of functions), their newest versions and the secrets they need
+          plugins:info <package>[@version]
+                               A plugin package's settings, secrets and what it does
+          plugins:install <package>[@version] --id <id> [--set KEY=value …]
+                               Install a copy as <id> (its functions are <id>.<name>; secrets <ID>__<NAME>)
+          plugins:configure <id> --set KEY=value …
+          plugins:upgrade <id>[@version] [--set KEY=value …]
+                               Newest version unless one is given; settings kept
+          plugins:uninstall <id> [--remove-secrets]
+                               Its functions go; what it wrote stays
           assets init [<dir>]  Make an assets folder (default assets/), assets.rules and its tests, and add them to winche.json
           assets deploy [<dir>]
                                Publish the assets folder as a new release and move its channel to it (--channel, default
@@ -255,6 +265,12 @@ internal static partial class CliApp
                 "indexes pull" => await run.IndexesPullAsync(ct),
                 "functions init" => run.FunctionsInit(a.Positional.ElementAtOrDefault(2)),
                 "functions deploy" => await run.FunctionsDeployAsync(a.Positional.ElementAtOrDefault(2), ct),
+                "plugins" => await run.PluginsListAsync(ct),
+                "plugins:info" => await run.PluginInfoAsync(Arg(1) ?? throw new CliException("Usage: winche plugins:info <package>[@version]", 2), ct),
+                "plugins:install" => await run.PluginInstallAsync(Arg(1) ?? throw new CliException("Usage: winche plugins:install <package>[@version] --id <id> [--set KEY=value …]", 2), ct),
+                "plugins:configure" => await run.PluginConfigureAsync(Arg(1) ?? throw new CliException("Usage: winche plugins:configure <id> --set KEY=value …", 2), ct),
+                "plugins:upgrade" => await run.PluginUpgradeAsync(Arg(1) ?? throw new CliException("Usage: winche plugins:upgrade <id>[@version] [--set KEY=value …]", 2), ct),
+                "plugins:uninstall" => await run.PluginUninstallAsync(Arg(1) ?? throw new CliException("Usage: winche plugins:uninstall <id> [--remove-secrets]", 2), ct),
                 "functions secrets" => await run.FunctionSecretsAsync(ct),
                 "functions secrets:set" => await run.FunctionSecretSetAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:set <NAME> [--from-file <path>]", 2), ct),
                 "functions secrets:remove" => await run.FunctionSecretRemoveAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:remove <NAME>", 2), ct),
@@ -680,7 +696,8 @@ internal static partial class CliApp
             var client = await ClientAsync(ct);
             var pages = PageBuilds.Of(Config);
             if (!args.Flag("no-build") && !await PageBuilds.BuildAsync(pages, env, ct)) return 1;
-            return await FunctionsFolder.DeployAsync(client, folder, args.Value("message"), env, ct, pages);
+            return await FunctionsFolder.DeployAsync(client, folder, args.Value("message"), env, ct, pages,
+                Config?.Plugins is { } listed ? await PluginsForDeployAsync(client, listed, ct) : null);
         }
 
         public async Task<int> EmulatorsAsync(string? command, CancellationToken ct)
@@ -703,6 +720,7 @@ internal static partial class CliApp
                 AssetsChannel = AssetsChannel(),
                 Functions = FunctionsDir(null) is var fdir && Directory.Exists(fdir) ? fdir : null,
                 Pages = PageBuilds.Of(config),
+                Plugins = config?.Plugins,
                 Quiet = args.Flag("quiet") || command is not null,
                 Verbose = args.Flag("verbose"),
                 ProjectId = config?.ProjectId ?? "demo",
@@ -1274,12 +1292,14 @@ internal static partial class CliApp
 internal sealed class Args
 {
     private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose", "reauth", "no-browser", "no-build",
-        "rotate", "path-style", "finish", "cancel", "keep-old", "follow"];
+        "rotate", "path-style", "finish", "cancel", "keep-old", "follow", "remove-secrets"];
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "folder", "title", "role", "issuer", "subject", "audience", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
         "role", "sdk", "android-package", "apple-bundle-id", "web-origin",
         "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel",
         "ref", "access-key-id"];
+    /// <summary>Options that may be given more than once (--set KEY=value --set …).</summary>
+    private static readonly HashSet<string> Repeated = ["set"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project", ["-f"] = "follow" };
 
     public List<string> Positional { get; } = [];
@@ -1302,6 +1322,13 @@ internal sealed class Args
             if (name is null) { a.Positional.Add(arg); continue; }
 
             if (Flags.Contains(name)) { a._options[name] = null; continue; }
+            if (Repeated.Contains(name))
+            {
+                var item = inline ?? (i + 1 < argv.Length ? argv[++i] : throw new CliException($"{arg} needs a value.", 2));
+                if (!a._many.TryGetValue(name, out var items)) a._many[name] = items = [];
+                items.Add(item);
+                continue;
+            }
             if (!Valued.Contains(name)) throw new CliException($"Unknown option '{arg}'. Run: winche --help", 2);
             var value = inline ?? (i + 1 < argv.Length ? argv[++i] : throw new CliException($"{arg} needs a value.", 2));
             a._options[name] = value;
@@ -1311,4 +1338,6 @@ internal sealed class Args
 
     public bool Flag(string name) => _options.ContainsKey(name);
     public string? Value(string name) => _options.GetValueOrDefault(name);
+    public IReadOnlyList<string> Values(string name) => _many.TryGetValue(name, out var v) ? v : [];
+    private readonly Dictionary<string, List<string>> _many = new(StringComparer.Ordinal);
 }

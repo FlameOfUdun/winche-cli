@@ -176,7 +176,9 @@ internal static class FunctionsFolder
     }
 
     /// <summary>Deploys through the console (as the signed-in user or a service account); prints the functions or the problems.</summary>
-    public static async Task<int> DeployAsync(ConsoleClient console, string dir, string? note, CliEnvironment env, CancellationToken ct, IReadOnlyList<BuiltPage>? pages = null)
+    /// <param name="plugins">The plugins winche.json lists (the deployment gets exactly these), or null to keep the installed ones.</param>
+    public static async Task<int> DeployAsync(ConsoleClient console, string dir, string? note, CliEnvironment env, CancellationToken ct, IReadOnlyList<BuiltPage>? pages = null,
+        IReadOnlyList<object>? plugins = null)
     {
         var files = Read(dir);
         PageBuilds.AddTo(files, pages ?? []);
@@ -196,7 +198,7 @@ internal static class FunctionsFolder
             }
         }
         var (ok, body) = await console.PostAsync("functions/deploy",
-            new { files, note = note ?? $"Deployed from {Path.GetFileName(Path.GetFullPath(dir))}", resources = resources.ToDictionary(a => a.Key, a => a.Value.Entry) }, "functions", ct);
+            new { files, note = note ?? $"Deployed from {Path.GetFileName(Path.GetFullPath(dir))}", resources = resources.ToDictionary(a => a.Key, a => a.Value.Entry), plugins }, "functions", ct);
         if (!ok)
         {
             env.Error.WriteLine($"Not deployed: {body["error"]?["message"]?.GetValue<string>() ?? "the console refused it."}");

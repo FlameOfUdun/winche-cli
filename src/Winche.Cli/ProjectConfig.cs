@@ -45,6 +45,11 @@ internal sealed class ProjectConfig
     /// pages()'s <c>files</c> names → where its project is and how it's built.
     /// </summary>
     [JsonPropertyName("pages")] public Dictionary<string, PageConfig>? Pages { get; set; }
+    /// <summary>
+    /// The plugins functions deploy installs (id → package, version, settings). When given, the deployment has exactly
+    /// these; without it, a deploy keeps the ones installed (in the console or with winche plugins:install).
+    /// </summary>
+    [JsonPropertyName("plugins")] public Dictionary<string, PluginConfig>? Plugins { get; set; }
 
     [JsonIgnore] public string Directory { get; private set; } = "";
     [JsonIgnore] public string? FilePath { get; private set; }
@@ -123,6 +128,14 @@ internal sealed class PageConfig
     [JsonPropertyName("source")] public string? Source { get; set; }
     [JsonPropertyName("build")] public string? Build { get; set; }
     [JsonPropertyName("output")] public string? Output { get; set; }
+}
+
+/// <summary>A plugin in winche.json: its npm package, its exact version (else the newest), its settings.</summary>
+internal sealed class PluginConfig
+{
+    [JsonPropertyName("package")] public string? Package { get; set; }
+    [JsonPropertyName("version")] public string? Version { get; set; }
+    [JsonPropertyName("settings")] public Dictionary<string, System.Text.Json.Nodes.JsonNode?>? Settings { get; set; }
 }
 
 /// <summary><c>"assets"</c> in winche.json: the folder published as a release, and the channel moved to it.</summary>

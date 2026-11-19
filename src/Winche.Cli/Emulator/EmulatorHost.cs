@@ -51,6 +51,8 @@ internal sealed record EmulatorOptions
     public string? Functions { get; init; }
     /// <summary>Console pages built from their own projects: their build output is deployed with the functions.</summary>
     public IReadOnlyList<BuiltPage> Pages { get; init; } = [];
+    /// <summary>winche.json's plugins, installed beside the functions folder's code (from npm, as on the server).</summary>
+    public Dictionary<string, PluginConfig>? Plugins { get; init; }
     /// <summary>The deno program for functions.</summary>
     public string? DenoPath { get; init; }
     /// <summary>The project id apps see in /.well-known/winche.</summary>
@@ -255,7 +257,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         host.Watch(options.StorageRules, WincheStorageKeys.RULE_ENGINE_KEY);
         host.Watch(options.AssetsRules, AssetsServiceCollectionExtensions.RulesKey);
         if (options.Assets is { } assets) await host.WatchAssetsAsync(assets, options.AssetsChannel);
-        if (options.Functions is { } folder) await host.WatchFunctionsAsync(folder, options.Pages, ct);
+        if (options.Functions is { } folder) await host.WatchFunctionsAsync(folder, options.Pages, options.Plugins, ct);
         return host;
     }
 
@@ -319,7 +321,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
     }
 
     /// <summary>Deploys the functions folder now and whenever a file in it is saved; a broken save leaves the last good version running.</summary>
-    private async Task WatchFunctionsAsync(string folder, IReadOnlyList<BuiltPage> pages, CancellationToken ct)
+    private async Task WatchFunctionsAsync(string folder, IReadOnlyList<BuiltPage> pages, Dictionary<string, PluginConfig>? plugins, CancellationToken ct)
     {
         var functions = _app.Services.GetRequiredService<Winche.Functions.WincheFunctions>();
         var name = Path.GetFileName(folder);
@@ -339,8 +341,10 @@ internal sealed class EmulatorHost : IAsyncDisposable
                 var missing = (await functions.MissingResourcesAsync([.. resources.Values.Select(a => a.Entry.Hash)])).ToHashSet();
                 foreach (var (_, (entry, file)) in resources)
                     if (missing.Remove(entry.Hash)) await functions.PutResourceAsync(await File.ReadAllBytesAsync(file), entry.Hash);
+                var installs = plugins is null ? null : await functions.ResolveDeployPluginsAsync(
+                    [.. plugins.Select(p => new Winche.Functions.PluginRequest(p.Key, p.Value.Package ?? "", p.Value.Version, p.Value.Settings))], "emulator");
                 var d = await functions.DeployAsync(files, first ? $"{name}/ at start" : $"{name}/ saved", "emulator",
-                    resources: resources.ToDictionary(a => a.Key, a => a.Value.Entry));
+                    resources: resources.ToDictionary(a => a.Key, a => a.Value.Entry), plugins: installs);
                 _out.WriteLine($"{DateTime.Now:HH:mm:ss} {(first ? "λ" : "↻")} functions v{d.Version}: {(d.Functions.Count == 0 ? "none exported" : string.Join(", ", d.Functions.Select(f => $"{f.Name} ({f.Trigger.Describe()})")))}"
                     + (resources.Count == 0 ? "" : $" · {resources.Count} resource{(resources.Count == 1 ? "" : "s")}"));
             }

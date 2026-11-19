@@ -184,8 +184,8 @@ Found in the working directory or the nearest parent; rule file paths are relati
 
 Optional keys: `"projects"` (below), `"indexes"` (default `database.indexes`), `"functions"` (the functions folder,
 default `functions`; `winche functions init` adds it), `"assets"` (`{ "folder": "assets", "channel": "production" }`;
-`winche assets init` adds it, with `"assets": "assets.rules"` under `"rules"`) and `"projectId"` (the emulators'
-project id).
+`winche assets init` adds it, with `"assets": "assets.rules"` under `"rules"`), `"plugins"` (below) and `"projectId"`
+(the emulators' project id).
 
 The rules language is Winche.Rules' — see the **[Rules Language Guide](https://github.com/FlameOfUdun/winche-rules/blob/main/GUIDE.md)**:
 
@@ -393,6 +393,32 @@ Setting one applies from the functions' next run; there's nothing to deploy. It 
 sign-in where the console requires it); a service account can't. In the emulators, secrets come from `.secrets.local` in the
 functions folder (`NAME=value` lines, reloaded on save, never deployed; `winche functions init` adds it to
 `.gitignore`).
+
+### Plugins
+
+Plugins are packages of functions (on npm) that a project installs instead of writing them, each copy under an id
+with its own settings and secrets. Its functions are `<id>.<name>` (apps call `functions.call("sms.send", …)`); its
+secrets are `<ID>__<NAME>`.
+
+```sh
+winche plugins:info text-plugin                           # its settings, secrets and what it does
+winche plugins:install text-plugin@1.2.0 --id sms --set FROM=+441234567890 --set QUEUE=sms
+winche functions secrets:set SMS__AUTH_TOKEN              # its secret, as any other
+winche plugins                                            # installed copies, newer versions, secrets still needed
+winche plugins:configure sms --set QUEUE=texts
+winche plugins:upgrade sms                                # the newest (or sms@2.0.0); settings kept
+winche plugins:uninstall sms --remove-secrets             # its functions go; what it wrote stays
+```
+
+Or list them in `winche.json`, and `functions deploy` installs exactly these (the emulators run them too):
+
+```json
+"plugins": { "sms": { "package": "text-plugin", "version": "1.2.0", "settings": { "FROM": "+441234567890" } } }
+```
+
+Without `"plugins"`, a deploy keeps whatever is installed. With it, plugins installed or changed in the console that
+the deploy would remove or change are listed first and asked about; in CI (nobody to answer) the deploy is refused
+unless `--force`. Each change is a new functions version, rolled back with the code.
 
 ## Assets
 

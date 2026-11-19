@@ -213,3 +213,61 @@ export const pages = (options) => define({ kind: "consolePage" }, () => null, op
 export const http = {
     onRequest: (handler, options) => define({ kind: "http", events: options?.methods }, handler, options),
 };
+const PLUGIN_FUNCTION = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
+/**
+ * Defines a plugin: functions that projects install, configure and upgrade from the console or winche.json instead
+ * of writing them. The package's default export; its winche-plugin.json lists the settings and secrets an installer
+ * gives. `make` runs once for each installed copy and returns its functions by name:
+ *
+ *   export default plugin((p) => {
+ *     const token = p.secret("AUTH_TOKEN");
+ *     return {
+ *       send: callable(async (data: { to: string; body: string }, ctx) => { … token.value() … p.setting("FROM") … }, { secrets: [token] }),
+ *       queued: onDocument.created(`${p.setting("QUEUE")}/{id}`, async (e) => { … }, { secrets: [token] }),
+ *     };
+ *   });
+ *
+ * Apps call a copy's callables by its id: functions.call("sms.send", { … }).
+ */
+export function plugin(make) {
+    if (typeof make !== "function")
+        throw new Error("plugin: give a function that returns the plugin's functions, e.g. plugin((p) => ({ send: callable(…) })).");
+    return Object.freeze({
+        __wincheplugin: 1,
+        install(installation) {
+            const { id, settings = {}, secrets: names = {} } = installation ?? {};
+            const handles = new Map();
+            const instance = Object.freeze({
+                id,
+                settings: Object.freeze({ ...settings }),
+                setting(name) {
+                    if (!Object.hasOwn(settings, name))
+                        throw new Error(`The plugin has no setting ${name}: list it in its winche-plugin.json.`);
+                    return settings[name];
+                },
+                secret(name) {
+                    if (!Object.hasOwn(names, name))
+                        throw new Error(`The plugin has no secret ${name}: list it in its winche-plugin.json.`);
+                    let handle = handles.get(name);
+                    if (!handle)
+                        handles.set(name, handle = secrets.define(names[name]));
+                    return handle;
+                },
+            });
+            const made = make(instance);
+            if (!made || typeof made !== "object")
+                throw new Error("plugin: make returns the plugin's functions by name, e.g. { send: callable(…) }.");
+            const functions = {};
+            for (const [name, fn] of Object.entries(made)) {
+                if (!PLUGIN_FUNCTION.test(name))
+                    throw new Error(`plugin: '${name}' isn't a function name (letters and digits).`);
+                if (!fn || typeof fn.__winche !== "number")
+                    throw new Error(`plugin: ${name} isn't a function (callable, onDocument.created, http.onRequest, …).`);
+                if (fn.trigger.kind === "consolePage")
+                    throw new Error(`plugin: ${name}: plugins can't add console pages.`);
+                functions[name] = fn;
+            }
+            return Object.freeze({ __wincheGroup: 1, id, functions: Object.freeze(functions) });
+        },
+    });
+}

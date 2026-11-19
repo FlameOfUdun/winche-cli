@@ -401,3 +401,66 @@ export declare const http: {
         [key: string]: Json;
     } | Response | null>;
 };
+/**
+ * An installed copy of a plugin, as its functions see it: the id it was installed under, the settings the installer
+ * gave (the ones its winche-plugin.json lists, with their defaults), and its secrets.
+ */
+export interface PluginInstance {
+    /** The id it's installed under (e.g. "sms"): its functions are called "sms.send", …. */
+    readonly id: string;
+    /** Every setting its winche-plugin.json lists, as the installer set it (or its default). */
+    readonly settings: {
+        readonly [name: string]: Json;
+    };
+    /** One setting's value; throws for a name winche-plugin.json doesn't list. */
+    setting<T extends Json = Json>(name: string): T;
+    /**
+     * One of its secrets (a name winche-plugin.json lists, e.g. "AUTH_TOKEN"): a handle to list in a function's
+     * `secrets` and read with `value()`, as for `secrets.define`. Each installed copy has its own (the project's secret
+     * `SMS__AUTH_TOKEN` for the copy installed as "sms").
+     */
+    secret(name: string): Secret;
+}
+/** @internal How the server installs a plugin: what its wrapper module passes. */
+export interface PluginInstallation {
+    id: string;
+    settings: {
+        [name: string]: Json;
+    };
+    /** The plugin's secret names → the project secrets they are for this copy. */
+    secrets: {
+        [name: string]: string;
+    };
+}
+/** A plugin package's default export: its functions, made for each installed copy. */
+export interface Plugin {
+    readonly __wincheplugin: 1;
+    /** Makes one installed copy's functions (the server does, for each copy). Tests can call it too. */
+    install(installation: PluginInstallation): PluginFunctions;
+}
+/** @internal One installed copy's functions, as the server finds them. */
+export interface PluginFunctions {
+    readonly __wincheGroup: 1;
+    readonly id: string;
+    readonly functions: {
+        readonly [name: string]: WincheFunction<any, any>;
+    };
+}
+/**
+ * Defines a plugin: functions that projects install, configure and upgrade from the console or winche.json instead
+ * of writing them. The package's default export; its winche-plugin.json lists the settings and secrets an installer
+ * gives. `make` runs once for each installed copy and returns its functions by name:
+ *
+ *   export default plugin((p) => {
+ *     const token = p.secret("AUTH_TOKEN");
+ *     return {
+ *       send: callable(async (data: { to: string; body: string }, ctx) => { … token.value() … p.setting("FROM") … }, { secrets: [token] }),
+ *       queued: onDocument.created(`${p.setting("QUEUE")}/{id}`, async (e) => { … }, { secrets: [token] }),
+ *     };
+ *   });
+ *
+ * Apps call a copy's callables by its id: functions.call("sms.send", { … }).
+ */
+export declare function plugin(make: (p: PluginInstance) => {
+    [name: string]: WincheFunction<any, any>;
+}): Plugin;
