@@ -212,4 +212,49 @@ public sealed class AssetsCliTests(PostgresFixture fx) : IDisposable
         Write("assets.cdn.json", """{ "files": { "translations/en.json": "https://cdn.example.com/app/bvm.mp4" } }""");
         Assert.Contains("is in the folder and on the CDN", (await Admin("assets", "deploy", "--channel", _channel, "-m", "Both")).Err);
     }
+
+    [Fact]
+    public async Task A_deploy_that_would_remove_files_added_in_the_console_says_so_first()
+    {
+        Write("winche.json", $$"""{ "server": "http://localhost", "project": "demo", "rules": {}, "assets": { "folder": "assets" } }""");
+        Write("assets/translations/en.json", "{}");
+        var first = await Admin("assets", "deploy", "--channel", _channel, "-m", "First");
+        Assert.True(first.Exit == 0, first.All);
+
+        // Someone adds a page in the console: the release is marked as made there.
+        using var api = App.CreateClient();
+        api.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await App.AdminTokenAsync());
+        var page = "<h1>Added in the console</h1>"u8.ToArray();
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(page));
+        Assert.True((await api.PutAsync($"/console/v1/projects/demo/assets/contents/{hash}", new ByteArrayContent(page))).IsSuccessStatusCode);
+        var en = System.Text.Json.JsonDocument.Parse(await (await api.GetAsync("/console/v1/projects/demo/assets/channels/" + _channel + "/files")).Content.ReadAsStringAsync())
+            .RootElement.GetProperty("files")[0];
+        var published = await api.PostAsync("/console/v1/projects/demo/assets/releases", System.Net.Http.Json.JsonContent.Create(new
+        {
+            note = "A page", channel = _channel, source = "console",
+            files = new Dictionary<string, object>
+            {
+                ["translations/en.json"] = new { hash = en.GetProperty("hash").GetString(), size = 2, mimeType = "" },
+                ["pages/new.html"] = new { hash, size = page.Length, mimeType = "" },
+            },
+        }));
+        Assert.True(published.IsSuccessStatusCode, await published.Content.ReadAsStringAsync());
+
+        // In CI: refused, naming what would go.
+        Write("assets/translations/de.json", "{}");
+        var ci = await Admin("assets", "deploy", "--channel", _channel, "-m", "German");
+        Assert.NotEqual(0, ci.Exit);
+        Assert.Contains("was made in the console", ci.Err);
+        Assert.Contains("- pages/new.html", ci.Err);
+        // In a terminal: asked; no publishes nothing.
+        _stdin = "n\n";
+        var asked = await Admin("assets", "deploy", "--channel", _channel, "-m", "German");
+        Assert.Contains("Publish the folder anyway?", asked.Out);
+        Assert.Contains("Nothing published", asked.Out);
+        _stdin = null;
+        // --force publishes the folder as it is.
+        var forced = await Admin("assets", "deploy", "--channel", _channel, "-m", "German", "--force");
+        Assert.True(forced.Exit == 0, forced.All);
+        Assert.Contains("points at it", forced.Out);
+    }
 }

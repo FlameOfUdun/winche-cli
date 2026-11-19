@@ -428,6 +428,9 @@ address:
 one once through a signed link for its hash. Apps never see the addresses; each read is the rules, then a link the CDN
 takes for a few minutes. Give a replaced file a new address: a release names its content by hash.
 
+**Releases made in the console** (Assets → Files → New release) can have files the folder doesn't. Deploying the folder
+over one lists what it would take out and asks first; in CI it refuses unless `--force`.
+
 ## Emulators
 
 `winche emulators start` runs Winche.Database (REST and the live WebSocket), Winche.Storage, Winche Auth, functions and

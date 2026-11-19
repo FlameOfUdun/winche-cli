@@ -115,8 +115,11 @@ internal static partial class CliApp
             foreach (var p in body["error"]?["details"]?["errors"] as JsonArray ?? []) env.Error.WriteLine($"  {p}");
         }
 
-        /// <summary>The channel's release and its files (path → hash), or null when the channel isn't there yet.</summary>
-        private static async Task<(int Release, Dictionary<string, string> Files)?> ChannelFilesAsync(ConsoleClient client, string channel, CancellationToken ct)
+        /// <summary>
+        /// The channel's release, its files (path → hash) and where it was made ("console", or null for a deploy), or null
+        /// when the channel isn't there yet.
+        /// </summary>
+        private static async Task<(int Release, Dictionary<string, string> Files, string? Source)?> ChannelFilesAsync(ConsoleClient client, string channel, CancellationToken ct)
         {
             var (ok, page) = await client.GetAsync("assets", "assets", ct);
             if (!ok) throw new CliException(Message(page, "The console refused to list the assets."));
@@ -124,7 +127,8 @@ internal static partial class CliApp
             if (at is not { } number) return null;
             var (found, release) = await client.GetAsync($"assets/releases/{number}", "assets", ct, missingOk: true);
             if (!found) throw new CliException(Message(release, $"Release {number} couldn't be read."));
-            return (number, (release["files"] as JsonArray ?? []).ToDictionary(f => f!["path"]!.GetValue<string>(), f => f!["hash"]!.GetValue<string>(), StringComparer.Ordinal));
+            return (number, (release["files"] as JsonArray ?? []).ToDictionary(f => f!["path"]!.GetValue<string>(), f => f!["hash"]!.GetValue<string>(), StringComparer.Ordinal),
+                release["source"]?.GetValue<string>());
         }
 
         private void PrintChanges((List<string> Added, List<string> Changed, List<string> Removed) d, int limit = 30)
@@ -184,6 +188,22 @@ internal static partial class CliApp
             if (!same && current is not null) PrintChanges(changes);
             if (same && !args.Flag("force")) { env.Out.WriteLine("Nothing to publish (--force publishes it again as a new release)."); return 0; }
             if (args.Flag("dry-run")) { env.Out.WriteLine("Dry run: nothing published."); return 0; }
+
+            // A release made in the console may have files the folder doesn't: say what deploying the folder removes.
+            if (current is { Source: "console" } made && changes.Removed.Count > 0 && !args.Flag("force"))
+            {
+                env.Error.WriteLine($"Release #{made.Release} on {channel} was made in the console. Deploying the folder removes {changes.Removed.Count} file{(changes.Removed.Count == 1 ? "" : "s")} it has:");
+                foreach (var p in changes.Removed.Take(30)) env.Error.WriteLine($"  - {p}");
+                if (changes.Removed.Count > 30) env.Error.WriteLine($"  … and {changes.Removed.Count - 30} more");
+                if (!env.Interactive) throw new CliException("Add them to the folder (or take them out in the console), or pass --force to publish the folder as it is.");
+                env.Out.Write("Publish the folder anyway? [y/N] ");
+                var reply = env.In.ReadLine()?.Trim();
+                if (!string.Equals(reply, "y", StringComparison.OrdinalIgnoreCase) && !string.Equals(reply, "yes", StringComparison.OrdinalIgnoreCase))
+                {
+                    env.Out.WriteLine("Nothing published.");
+                    return 1;
+                }
+            }
 
             // Only the contents the server doesn't have are sent; the rest are named by hash.
             var (asked, answer) = await client.PostAsync("assets/contents/missing", new { hashes = local.Where(e => e.File is not null).Select(e => e.Hash).Distinct() }, "assets", ct);
