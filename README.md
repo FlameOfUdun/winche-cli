@@ -43,7 +43,8 @@ winche settings pull                                     # the project's setting
 winche accounts:create gitlab-main --scopes rules,indexes  # a service account for CI (accounts, accounts:keys:add, accounts:trust)
 winche logs -f                                           # the project's logs, then new ones as they come
 winche users                                             # your apps' users (users:disable, users:enable, users:sign-out)
-winche secrets:set smtp-password                         # a secret, typed unseen or from WINCHE_SECRET (or --ref aws-ssm:/app/key)
+winche secrets                                           # the project's secrets: functions' and plugins', and the products' own
+winche secrets:set MAIL_KEY                              # add or replace one, typed unseen or from WINCHE_SECRET (or --ref aws-ssm:/app/key)
 winche secrets:sources                                   # where secrets can be read from (AWS), the project's own key (secrets:key aws, secrets:test)
 winche storage:move --bucket files --region eu-west-1 …  # move the project's files to a bucket (data:move: its database)
 winche login:approve BCDF-GHJK                           # allow a CLI waiting with --no-browser, as you
@@ -51,7 +52,6 @@ winche server settings pull                              # the server's own sett
 winche indexes deploy -m "why"                           # database.indexes to the console (also diff, pull)
 winche functions init                                    # a functions/ folder: index.ts, deno.json (the SDKs from npm)
 winche functions deploy -m "what changed"                # deploy it through the console, as you (or a service account)
-winche functions secrets                                 # the secrets functions read (secrets:set NAME, secrets:remove NAME)
 winche assets init                                       # an assets/ folder, assets.rules and its tests, in winche.json
 winche assets deploy -m "German"                         # publish the folder as a release; its channel points at it
 winche assets diff                                       # the folder against the channel's release
@@ -119,8 +119,10 @@ winche settings pull                                   # settings/database.json,
   admins `winche projects:archive | projects:restore <id>` and `projects:delete <id>` (archived first; asks you to type
   the id, or `--yes`). Anything that can't be undone asks first; without a terminal it needs `--yes`.
 - **Secrets** are never on the command line: they're typed unseen, or read from `WINCHE_SECRET`. `winche secrets`
-  lists the project's (`smtp-password`, and `keycloak-sync --provider <name>` for providers kept in step with
-  Keycloak); `winche secrets:set <name>` sets one. `winche webhooks:secret <id>` prints a webhook's signing secret
+  lists the project's, as the console's Secrets page does: the ones functions and plugins read (`MAIL_KEY`,
+  `SMS__AUTH_TOKEN`), and the products' own (`smtp-password`, and `keycloak-sync --provider <name>` for providers kept
+  in step with Keycloak). `winche secrets:set <name>` sets one, `winche secrets:remove <NAME>` removes a functions or
+  plugin one. (`winche functions secrets…`, the old names, still work.) `winche webhooks:secret <id>` prints a webhook's signing secret
   (`--rotate` makes a new one).
 - **Your apps' users:** `winche users [--search ann] [--limit 50]`, `users:disable | users:enable | users:sign-out
   <email or uid>`.
@@ -363,17 +365,17 @@ In a page, `import { documents } from "@winche-technologies/winche-admin"` acts 
 limits it). The page brings the SDK like any dependency (bundled with it; with Vite, `base: "./"`, since a page's files
 are addressed relative to it); the console gives it only the channel the SDK finds by itself.
 
-### Function secrets
+### Secrets
 
 Functions read API keys and passwords through handles: `const key = secrets.define("NAME")` at the top, listed in the
 functions' options (`{ secrets: [key] }`), read with `key.value()`. They're kept encrypted on the server and never shown again:
 
 ```sh
-winche functions secrets                                  # each one: set or not, when, by whom, which functions use it
-winche functions secrets:set MAIL_API_KEY                 # add or replace: typed unseen, or from WINCHE_SECRET
-winche functions secrets:set SERVICE_ACCOUNT --from-file sa.json   # a file's contents (a service account's JSON)
-winche functions secrets:set SES_SECRET --ref aws-sm:app/ses#secretAccessKey   # read from AWS when functions run
-winche functions secrets:remove MAIL_API_KEY
+winche secrets                                            # each one: set or not, when, by whom, which functions use it
+winche secrets:set MAIL_API_KEY                           # add or replace: typed unseen, or from WINCHE_SECRET
+winche secrets:set SERVICE_ACCOUNT --from-file sa.json    # a file's contents (a service account's JSON)
+winche secrets:set SES_SECRET --ref aws-sm:app/ses#secretAccessKey   # read from AWS when functions run
+winche secrets:remove MAIL_API_KEY
 ```
 
 A secret can instead be a **reference** to where it's really kept, read when it's needed (and again a few minutes
@@ -403,7 +405,7 @@ secrets are `<ID>__<NAME>`.
 ```sh
 winche plugins:info text-plugin                           # its settings, secrets and what it does
 winche plugins:install text-plugin@1.2.0 --id sms --set FROM=+441234567890 --set QUEUE=sms
-winche functions secrets:set SMS__AUTH_TOKEN              # its secret, as any other
+winche secrets:set SMS__AUTH_TOKEN                        # its secret, as any other
 winche plugins                                            # installed copies, newer versions, secrets still needed
 winche plugins:configure sms --set QUEUE=texts
 winche plugins:upgrade sms                                # the newest (or sms@2.0.0); settings kept

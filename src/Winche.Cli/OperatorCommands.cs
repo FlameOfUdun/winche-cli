@@ -144,7 +144,7 @@ internal static partial class CliApp
 
         // ----- function secrets ------------------------------------------------------------------
 
-        /// <summary><c>winche functions secrets</c>: names, whether set, by whom, and which functions declare each. Never values.</summary>
+        /// <summary><c>winche functions secrets</c> (the old name; <c>winche secrets</c> lists these and the products' own): names, whether set, by whom, and which functions declare each. Never values.</summary>
         public async Task<int> FunctionSecretsAsync(CancellationToken ct)
         {
             var client = await ClientAsync(ct);
@@ -159,12 +159,60 @@ internal static partial class CliApp
                 var used = s["usedBy"]?.AsArray().Select(u => u!.ToString()).ToList() ?? [];
                 env.Out.WriteLine($"  {s["name"],-28} {set,-36} {(used.Count == 0 ? "no function declares it" : "used by " + string.Join(", ", used))}");
             }
-            env.Out.WriteLine("Add or replace one: winche functions secrets:set <NAME> [--ref aws-ssm:/app/key]   Remove one: winche functions secrets:remove <NAME>");
+            env.Out.WriteLine("Add or replace one: winche secrets:set <NAME> [--ref aws-ssm:/app/key]   Remove one: winche secrets:remove <NAME>");
             return 0;
         }
 
         /// <summary>
-        /// <c>winche functions secrets:set NAME</c>: adds or replaces it. The value comes from <c>--from-file</c> (e.g. a
+        /// <c>winche secrets</c>: what the console's Secrets page lists. The ones functions and plugins read (when the
+        /// project runs functions), then the products' own (when it runs Authentication). Never values.
+        /// </summary>
+        public async Task<int> AllSecretsAsync(CancellationToken ct)
+        {
+            var client = await ClientAsync(ct);
+            var shown = false;
+            var (status, body) = await client.SendAsync(HttpMethod.Get, "functions/secrets", null, ct);
+            if ((int)status is >= 200 and < 300)
+            {
+                shown = true;
+                env.Out.WriteLine("Functions and plugins");
+                var list = body["secrets"]?.AsArray() ?? [];
+                if (body["available"]?.GetValue<bool>() == false) env.Out.WriteLine("  Secrets need the server's master key: none can be set here.");
+                if (list.Count == 0) env.Out.WriteLine("  none yet");
+                foreach (var s in list)
+                {
+                    var set = s!["isSet"]?.GetValue<bool>() == true
+                        ? $"{(s["reference"] is { } r ? $"from {r}, " : "")}set {s["setAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd}{(s["setBy"] is { } by ? $" by {by}" : "")}" : "NOT SET";
+                    var used = s["usedBy"]?.AsArray().Select(u => u!.ToString()).ToList() ?? [];
+                    env.Out.WriteLine($"  {s["name"],-28} {set,-36} {(used.Count == 0 ? "no function reads it" : "used by " + string.Join(", ", used))}");
+                }
+            }
+            var (signinStatus, signin) = await client.SendAsync(HttpMethod.Get, "auth/settings/signin", null, ct);
+            if ((int)signinStatus is >= 200 and < 300 && signin["available"]?.GetValue<bool>() != false)
+            {
+                if (shown) env.Out.WriteLine();
+                shown = true;
+                env.Out.WriteLine("Sign-in");
+                env.Out.WriteLine($"  smtp-password                {Described(signin["smtpPassword"])}");
+                foreach (var (provider, info) in signin["syncSecrets"]?.AsObject() ?? [])
+                    env.Out.WriteLine($"  keycloak-sync --provider {provider,-3} {Described(info)}");
+            }
+            if (!shown) { env.Out.WriteLine("No secrets here: the project runs neither functions nor Authentication."); return 0; }
+            env.Out.WriteLine();
+            env.Out.WriteLine("Add or replace one: winche secrets:set <name> (WINCHE_SECRET, --from-file, typed unseen, or --ref aws-ssm:/app/key)   Remove one: winche secrets:remove <NAME>");
+            env.Out.WriteLine("Where else they can be read from: winche secrets:sources");
+            return 0;
+        }
+
+        /// <summary>
+        /// <c>winche secrets:set &lt;name&gt;</c>: a product's own secret (smtp-password, keycloak-sync), else one functions
+        /// and plugins read, by its NAME.
+        /// </summary>
+        public Task<int> SecretSetAsync(string name, CancellationToken ct) =>
+            name is "smtp-password" or "keycloak-sync" ? SecretsAsync(name, ct) : FunctionSecretSetAsync(name, ct);
+
+        /// <summary>
+        /// <c>winche secrets:set NAME</c> (or the old <c>functions secrets:set</c>): adds or replaces it. The value comes from <c>--from-file</c> (e.g. a
         /// service account's JSON), else WINCHE_SECRET, else it's typed without being shown.
         /// </summary>
         public async Task<int> FunctionSecretSetAsync(string name, CancellationToken ct)
@@ -185,20 +233,20 @@ internal static partial class CliApp
                 value = await File.ReadAllTextAsync(path, ct);
             }
             else value = env.GetVariable("WINCHE_SECRET") ?? (env.Interactive ? SecretValue(name) : throw new CliException("Set WINCHE_SECRET or use --from-file: there's no terminal to ask in.", 2));
-            if (value.Length == 0) throw new CliException("The value is empty. To remove the secret: winche functions secrets:remove " + name, 2);
+            if (value.Length == 0) throw new CliException("The value is empty. To remove the secret: winche secrets:remove " + name, 2);
             var client = await ClientAsync(ct);
             await OkAsync(client.SendAsync(HttpMethod.Put, $"functions/secrets/{name}", new { value }, ct), "Not set");
             env.Out.WriteLine($"Set {name}. Functions get it from their next run.");
             return 0;
         }
 
-        /// <summary><c>winche functions secrets:remove NAME</c>.</summary>
+        /// <summary><c>winche secrets:remove NAME</c> (or the old <c>functions secrets:remove</c>).</summary>
         public async Task<int> FunctionSecretRemoveAsync(string name, CancellationToken ct)
         {
             CheckSecretName(name);
             var client = await ClientAsync(ct);
             var (status, body) = await client.SendAsync(HttpMethod.Delete, $"functions/secrets/{name}", null, ct);
-            if (status == HttpStatusCode.NotFound) throw new CliException($"There's no secret {name}. See: winche functions secrets");
+            if (status == HttpStatusCode.NotFound) throw new CliException($"There's no secret {name}. See: winche secrets");
             if ((int)status is < 200 or >= 300) throw new CliException($"Not removed: {ConsoleClient.ErrorText(body, status)}");
             env.Out.WriteLine($"Removed {name}. Functions that read it fail until it's set again.");
             return 0;
@@ -206,7 +254,8 @@ internal static partial class CliApp
 
         private static void CheckSecretName(string name)
         {
-            if (Winche.Functions.FunctionSecrets.Problem(name) is { } problem) throw new CliException(problem, 2);
+            if (Winche.Functions.FunctionSecrets.Problem(name) is { } problem)
+                throw new CliException($"{problem} The products' own: smtp-password, keycloak-sync --provider <name>.", 2);
         }
 
         /// <summary>
@@ -284,7 +333,7 @@ internal static partial class CliApp
                     env.Out.WriteLine(info["appCredentials"]?.GetValue<bool>() == true
                         ? "References without the project's key are read with the server's own credentials (you're a server admin)."
                         : "References are read with the project's own key: set it with winche secrets:key <name> (the server's own credentials are for its admins).");
-                    env.Out.WriteLine("Use one: winche functions secrets:set NAME --ref aws-ssm:/app/key   (also secrets:set, server secrets:set)");
+                    env.Out.WriteLine("Use one: winche secrets:set <name> --ref aws-ssm:/app/key   (also server secrets:set)");
                     return 0;
                 case "test":
                     if (name is null) throw new CliException("Usage: winche secrets:test <reference>, e.g. aws-ssm:/app/key", 2);

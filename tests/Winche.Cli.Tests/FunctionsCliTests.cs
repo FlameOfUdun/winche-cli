@@ -64,6 +64,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
                 "/console/v1/projects/demo/tokens/current" => (HttpStatusCode.NoContent, ""),
                 "/console/v1/projects/demo/functions/secrets" => (HttpStatusCode.OK, """{ "available": true, "secrets": [{ "name": "MAIL_KEY", "isSet": true, "setAt": "2026-11-12T20:00:00Z", "setBy": "ann@example.com", "usedBy": ["sendReport"] }, { "name": "SA_JSON", "isSet": false, "setAt": null, "setBy": null, "usedBy": [] }] }"""),
                 "/console/v1/projects/demo/functions/secrets/MAIL_KEY" or "/console/v1/projects/demo/functions/secrets/SA_JSON" => (HttpStatusCode.NoContent, ""),
+                "/console/v1/projects/demo/auth/settings/signin" => (HttpStatusCode.OK, """{ "available": true, "settings": {}, "version": { "number": 1 }, "smtpPassword": { "setAt": "2026-11-10T09:00:00Z", "setBy": "bob@example.com", "reference": null }, "syncSecrets": {} }"""),
                 "/console/v1/projects/demo/secrets/sources" => (HttpStatusCode.OK, """
                     { "available": true, "appCredentials": false,
                       "sources": [{ "name": "aws-sm", "title": "AWS Secrets Manager", "hint": "a secret's ARN or its name", "key": "secrets.source.aws" },
@@ -202,41 +203,46 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
     }
 
     [Fact]
-    public async Task Function_secrets_are_listed_set_from_a_variable_or_a_file_and_removed()
+    public async Task Secrets_are_listed_as_the_console_shows_them_set_from_a_variable_or_a_file_and_removed()
     {
         File.WriteAllText(Path.Combine(_dir, "winche.json"), """{ "rules": {}, "server": "https://api.example.com", "project": "demo" }""");
         string? Ci(string v) => v == "WINCHE_TOKEN" ? "wsa_ci" : null;
         var console = new FakeConsole();
 
-        var (exit, output, err) = await Run(console, Ci, "functions", "secrets");
+        var (exit, output, err) = await Run(console, Ci, "secrets");
         Assert.True(exit == 0, err);
+        Assert.Contains("Functions and plugins", output);
+        Assert.Contains("Sign-in", output);
+        Assert.Contains("smtp-password", output);
+        Assert.Contains("set 2026-11-10 by bob@example.com", output);   // the products' own beside the functions'
         Assert.Contains("MAIL_KEY", output);
         Assert.Contains("set 2026-11-12 by ann@example.com", output);
         Assert.Contains("used by sendReport", output);
         Assert.Contains("NOT SET", output);
 
-        (exit, output, err) = await Run(console, v => v == "WINCHE_SECRET" ? "k-123" : Ci(v), "functions", "secrets:set", "MAIL_KEY");
+        (exit, output, err) = await Run(console, v => v == "WINCHE_SECRET" ? "k-123" : Ci(v), "secrets:set", "MAIL_KEY");
         Assert.True(exit == 0, err);
         var put = console.Requests.Last();
         Assert.Equal((HttpMethod.Put, "/console/v1/projects/demo/functions/secrets/MAIL_KEY", "k-123"), (put.Method, put.Path, JsonNode.Parse(put.Body!)!["value"]!.GetValue<string>()));
         Assert.Contains("Set MAIL_KEY.", output);
 
         File.WriteAllText(Path.Combine(_dir, "sa.json"), """{ "type": "service_account" }""");
-        (exit, _, err) = await Run(console, Ci, "functions", "secrets:set", "SA_JSON", "--from-file", "sa.json");
+        (exit, _, err) = await Run(console, Ci, "functions", "secrets:set", "SA_JSON", "--from-file", "sa.json");   // the old name still works
         Assert.True(exit == 0, err);
         Assert.Contains("service_account", JsonNode.Parse(console.Requests.Last().Body!)!["value"]!.GetValue<string>());
 
         (exit, _, err) = await Run(console, Ci, "functions", "secrets:set", "MAIL_KEY");   // no value and no terminal
         Assert.Equal(2, exit);
         Assert.Contains("WINCHE_SECRET", err);
-        (exit, _, err) = await Run(console, Ci, "functions", "secrets:set", "mail-key");
+        (exit, _, err) = await Run(console, Ci, "secrets:set", "mail-key");
         Assert.Equal(2, exit);
         Assert.Contains("isn't a secret name", err);
+        Assert.Contains("smtp-password, keycloak-sync", err);
 
-        (exit, output, err) = await Run(console, Ci, "functions", "secrets:remove", "MAIL_KEY");
+        (exit, output, err) = await Run(console, Ci, "secrets:remove", "MAIL_KEY");
         Assert.True(exit == 0, err);
         Assert.Equal((HttpMethod.Delete, "/console/v1/projects/demo/functions/secrets/MAIL_KEY"), (console.Requests.Last().Method, console.Requests.Last().Path));
-        (exit, _, err) = await Run(console, Ci, "functions", "secrets:remove", "NOPE");
+        (exit, _, err) = await Run(console, Ci, "secrets:remove", "NOPE");
         Assert.Equal(1, exit);
         Assert.Contains("There's no secret NOPE", err);
     }

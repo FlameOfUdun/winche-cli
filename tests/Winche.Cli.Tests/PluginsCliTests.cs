@@ -57,7 +57,7 @@ public class PluginsCliTests : IDisposable
         var (exit, output, _) = await Run(console, null, "plugins");
         Assert.Equal(0, exit);
         Assert.Contains("sms  text-plugin 1.0.0 (1.1.0 is out: winche plugins:upgrade sms)  from the console", output);
-        Assert.Contains("needs the secret SMS__AUTH_TOKEN: winche functions secrets:set SMS__AUTH_TOKEN", output);
+        Assert.Contains("needs the secret SMS__AUTH_TOKEN: winche secrets:set SMS__AUTH_TOKEN", output);
 
         (exit, output, _) = await Run(console, null, "plugins:install", "text-plugin@1.1.0", "--id", "alerts", "--set", "FROM=+1", "--set", "RETRIES=2", "--set", "LOUD=true");
         Assert.Equal((0, "Functions version 3: Installed alerts (text-plugin 1.1.0)."), (exit, output.Trim()));

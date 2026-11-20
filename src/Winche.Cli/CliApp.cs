@@ -50,9 +50,15 @@ internal static partial class CliApp
           apps:delete <id>     Remove a registered app
           projects:archive | projects:restore | projects:delete <id>
                                Archive a project (refused until restored), or delete an archived one for good
-          secrets, secrets:set smtp-password | keycloak-sync --provider <name>
-                               The project's sign-in secrets (the value from WINCHE_SECRET, or typed unseen; or
-                               --ref aws-sm:<ARN or name>[#field] | aws-ssm:<parameter>: read from AWS instead)
+          secrets              The project's secrets, as the console's Secrets page lists them: the ones functions and
+                               plugins read (set or not, which functions use them) and the products' own (sign-in email,
+                               Keycloak sync). Never their values
+          secrets:set <name>   Add or replace one: a functions or plugin secret by its NAME (MAIL_KEY, SMS__AUTH_TOKEN), or
+                               smtp-password, keycloak-sync --provider <name>. The value from WINCHE_SECRET, --from-file
+                               <path>, or typed unseen; or --ref aws-sm:<ARN or name>[#field] | aws-ssm:<parameter>: read
+                               from AWS instead
+          secrets:remove <NAME>
+                               Remove a functions or plugin secret
           secrets:sources      Where secrets can be read from besides the server, and the project's own keys for them
           secrets:key <name>   Set the project's own key for a source (aws: --access-key-id, --region; the secret key
                                from WINCHE_SECRET or typed unseen; --clear removes it)
@@ -99,12 +105,8 @@ internal static partial class CliApp
                                Deploy the functions folder through the console, as you (winche login) or a service account
           pages build          Build the console pages with a build in winche.json ("pages"; functions deploy builds them too,
                                --no-build skips it)
-          functions secrets    The secrets functions read (ctx.secrets): set or not, by whom, which functions use them
-          functions secrets:set <NAME>
-                               Add or replace one (the value from WINCHE_SECRET, --from-file <path>, or typed unseen;
-                               or --ref aws-ssm:/app/key: read from AWS when functions run)
-          functions secrets:remove <NAME>
-                               Remove one
+          functions secrets, functions secrets:set | secrets:remove
+                               The old names of secrets, secrets:set and secrets:remove (they still work)
           plugins              The plugins installed (packages of functions), their newest versions and the secrets they need
           plugins:info <package>[@version]
                                A plugin package's settings, secrets and what it does
@@ -223,8 +225,9 @@ internal static partial class CliApp
                 "projects:archive" => await run.ProjectsChangeAsync("archive", Arg(1), ct),
                 "projects:restore" => await run.ProjectsChangeAsync("restore", Arg(1), ct),
                 "projects:delete" => await run.ProjectsChangeAsync("delete", Arg(1), ct),
-                "secrets" => await run.SecretsAsync(null, ct),
-                "secrets:set" => await run.SecretsAsync(Arg(1) ?? throw new CliException("Usage: winche secrets:set smtp-password | keycloak-sync --provider <name>", 2), ct),
+                "secrets" => await run.AllSecretsAsync(ct),
+                "secrets:set" => await run.SecretSetAsync(Arg(1) ?? throw new CliException("Usage: winche secrets:set <NAME> | smtp-password | keycloak-sync --provider <name>", 2), ct),
+                "secrets:remove" => await run.FunctionSecretRemoveAsync(Arg(1) ?? throw new CliException("Usage: winche secrets:remove <NAME>", 2), ct),
                 "secrets:sources" => await run.SecretSourcesAsync("sources", null, ct),
                 "secrets:key" => await run.SecretSourcesAsync("key", Arg(1), ct),
                 "secrets:test" => await run.SecretSourcesAsync("test", Arg(1), ct),
@@ -272,8 +275,8 @@ internal static partial class CliApp
                 "plugins:upgrade" => await run.PluginUpgradeAsync(Arg(1) ?? throw new CliException("Usage: winche plugins:upgrade <id>[@version] [--set KEY=value …]", 2), ct),
                 "plugins:uninstall" => await run.PluginUninstallAsync(Arg(1) ?? throw new CliException("Usage: winche plugins:uninstall <id> [--remove-secrets]", 2), ct),
                 "functions secrets" => await run.FunctionSecretsAsync(ct),
-                "functions secrets:set" => await run.FunctionSecretSetAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:set <NAME> [--from-file <path>]", 2), ct),
-                "functions secrets:remove" => await run.FunctionSecretRemoveAsync(Arg(2) ?? throw new CliException("Usage: winche functions secrets:remove <NAME>", 2), ct),
+                "functions secrets:set" => await run.FunctionSecretSetAsync(Arg(2) ?? throw new CliException("Usage: winche secrets:set <NAME> [--from-file <path>]", 2), ct),
+                "functions secrets:remove" => await run.FunctionSecretRemoveAsync(Arg(2) ?? throw new CliException("Usage: winche secrets:remove <NAME>", 2), ct),
                 "pages build" => await run.PagesBuildAsync(ct),
                 "assets init" => run.AssetsInit(Arg(2)),
                 "assets deploy" => await run.AssetsDeployAsync(Arg(2), ct),

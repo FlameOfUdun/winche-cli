@@ -57,7 +57,7 @@ internal static partial class CliApp
                 env.Out.WriteLine($"{p["id"]}  {p["package"]} {p["version"]}{update}  from the {(p["source"]?.ToString() == "deploy" ? "winche.json" : "console")}");
                 env.Out.WriteLine($"  {string.Join(", ", (p["functions"] as JsonArray ?? []).Select(f => f?.ToString()))}");
                 foreach (var s in p["secretsNeeded"] as JsonArray ?? [])
-                    env.Out.WriteLine($"  needs the secret {s}: winche functions secrets:set {s}");
+                    env.Out.WriteLine($"  needs the secret {s}: winche secrets:set {s}");
             }
             return 0;
         }
