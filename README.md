@@ -131,7 +131,8 @@ winche settings pull                                   # settings/database.json,
   Ctrl+C.
 - **Moving files:** `winche storage:move` says where the files are. With `--bucket`, `--region`, `--service-url` (for
   S3-compatible services), `--access-key` and `--path-style` (the secret key in `WINCHE_SECRET`), or `--to server`,
-  it copies every file there, shows the progress, then switches the project to it. `--finish` ends the move once
+  it copies every file there (an AWS bucket without `--access-key` is reached with the server's own AWS permissions,
+  its role or environment: server admins only), shows the progress, then switches the project to it. `--finish` ends the move once
   the server's catch-up pass has run (it says when); `--cancel` stops a move before the switch.
 - **Moving the database** (server admins): `winche data:move` says where it is; `--db-name` (and `--db-host`,
   `--db-port`, `--db-user`, `--db-ssl`, `WINCHE_DB_PASSWORD`) checks the target, then moves it while the project

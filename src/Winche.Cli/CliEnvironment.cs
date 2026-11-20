@@ -63,14 +63,23 @@ internal sealed class CliEnvironment
 
 internal static class Browser
 {
+    /// <summary>
+    /// How <paramref name="url"/> is opened on each system. On Windows the shell opens it itself (no cmd /c start: cmd
+    /// would hand the browser escapes such as ^&amp; inside the quoted address, and the link would break at its first &amp;).
+    /// </summary>
+    internal static System.Diagnostics.ProcessStartInfo Command(string url, bool windows, bool mac)
+    {
+        if (windows) return new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true };
+        var start = new System.Diagnostics.ProcessStartInfo(mac ? "open" : "xdg-open") { UseShellExecute = false };
+        start.ArgumentList.Add(url);
+        return start;
+    }
+
     public static void Open(string url)
     {
         try
         {
-            var (file, args) = OperatingSystem.IsWindows() ? ("cmd", $"/c start \"\" \"{url.Replace("&", "^&")}\"")
-                : OperatingSystem.IsMacOS() ? ("open", $"\"{url}\"")
-                : ("xdg-open", $"\"{url}\"");
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(file, args) { UseShellExecute = false })?.Dispose();
+            System.Diagnostics.Process.Start(Command(url, OperatingSystem.IsWindows(), OperatingSystem.IsMacOS()))?.Dispose();
         }
         catch
         {

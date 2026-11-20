@@ -566,7 +566,9 @@ internal static partial class CliApp
                         forcePathStyle = args.Flag("path-style"),
                     },
                 };
-                if (secretRef is null) secret = SecretValue("The bucket's secret key");
+                // A secret key goes with an access key; without either, a server admin moves them with the server's own
+                // AWS permissions (its role or environment), and anyone else is told so by the server.
+                if (secretRef is null && args.Value("access-key") is not null) secret = SecretValue("The bucket's secret key");
             }
             Confirm("Copy every file there, then switch to it?");
             await OkAsync(client.SendAsync(HttpMethod.Post, $"{path}/move", new { location, secretKey = secret, secretKeyReference = secretRef, reason }, ct), "Not moved");

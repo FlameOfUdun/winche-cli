@@ -69,7 +69,8 @@ internal static partial class CliApp
                                Your apps' users (--search, --limit)
           storage:move         Where files are kept; --bucket/--region/--service-url/--access-key (WINCHE_SECRET: the
                                secret key, or --ref aws-ssm:/app/bucket-key) or --to server copies them there, then
-                               switches; --finish, --cancel
+                               switches; an AWS bucket without --access-key uses the server's own AWS permissions
+                               (server admins); --finish, --cancel
           data:move            Where the project's database is; --db-name/--db-host/… moves it; --finish [--keep-old]
           logs                 The project's logs (--product database|storage, --level, --search, --since 1h,
                                --limit; -f/--follow keeps printing new ones)
@@ -609,7 +610,13 @@ internal static partial class CliApp
                 return 0;
             }
             var current = body["current"]?.GetValue<string>();
-            foreach (var p in body["projects"]!.AsArray())
+            var listed = body["projects"]!.AsArray();
+            if (listed.Count == 0 && body["archived"]?.AsArray() is not { Count: > 0 })
+            {
+                env.Out.WriteLine($"{ConsoleAddress.Describe(console)} has no projects yet. Make one (server admins): winche projects:create <id> --name \"Its name\"");
+                return 0;
+            }
+            foreach (var p in listed)
             {
                 var id = p!["id"]!.GetValue<string>();
                 var url = ConsoleAddress.Describe(ConsoleTarget.ForProject(console, id));
