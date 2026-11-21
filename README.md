@@ -111,7 +111,8 @@ winche settings pull                                   # settings/database.json,
   } ] }
   ```
 - **Apps:** `winche apps:create <name>` adds an app (`--id`, `--android-package`, `--apple-bundle-id`,
-  `--apple-team-id`; Flutter is the only SDK so far), and prints the `winche configure --app <id>` to run in its
+  `--apple-team-id`, `--apple-development` to accept App Attest keys from development builds; Flutter is the only SDK
+  so far), and prints the `winche configure --app <id>` to run in its
   folder. `winche apps` lists them with today's verified requests.
 - **Integrity:** apps prove they're the project's own and send an Integrity token with every request. `winche integrity`
   shows each product's mode (`off`, `monitor`: counted, never refused, the default; `enforce`: refused without a

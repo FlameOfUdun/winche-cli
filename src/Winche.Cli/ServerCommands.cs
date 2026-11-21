@@ -234,7 +234,9 @@ internal static partial class CliApp
                 var apple = a!["appleBundleId"]?.ToString() is { Length: > 0 } bundle ? (a["appleTeamId"]?.ToString() is { Length: > 0 } team ? $"{team}.{bundle}" : bundle) : null;
                 var where = new[] { a["androidPackage"]?.ToString(), apple }.Where(x => !string.IsNullOrEmpty(x));
                 var today = a["usage"]?.AsObject().Sum(u => u.Value?["today"]?.GetValue<long>() ?? 0) ?? 0;
-                env.Out.WriteLine($"  {a["id"],-24} {a["name"],-20} {a["sdk"],-8} {string.Join(", ", where),-44} {today} verified today");
+                var devices = a["devices"]?["count"]?.GetValue<long>() is { } n ? $", {n} App Attest device{(n == 1 ? "" : "s")}" : "";
+                var dev = a["appleDevelopment"]?.GetValue<bool>() == true ? " (development builds accepted)" : "";
+                env.Out.WriteLine($"  {a["id"],-24} {a["name"],-20} {a["sdk"],-8} {string.Join(", ", where),-44} {today} verified today{devices}{dev}");
             }
             return 0;
         }
@@ -248,6 +250,7 @@ internal static partial class CliApp
             {
                 name, id = args.Value("id"), sdk = args.Value("sdk") ?? "flutter",
                 androidPackage = args.Value("android-package"), appleBundleId = args.Value("apple-bundle-id"), appleTeamId = args.Value("apple-team-id"),
+                appleDevelopment = args.Flag("apple-development"),
             };
             var client = await ClientAsync(ct);
             var (status, body) = await client.SendAsync(HttpMethod.Post, "integrity/apps", request, ct);

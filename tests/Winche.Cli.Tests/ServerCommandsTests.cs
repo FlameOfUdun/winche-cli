@@ -284,13 +284,13 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     {
         await SetupAsync();
         Assert.Contains("No apps yet", (await Run(null, "apps")).Out);
-        var made = await Run(null, "apps:create", "Clinic iOS", "--id", "clinic-ios", "--apple-bundle-id", "com.example.clinic", "--apple-team-id", "ABCDE12345");
+        var made = await Run(null, "apps:create", "Clinic iOS", "--id", "clinic-ios", "--apple-bundle-id", "com.example.clinic", "--apple-team-id", "ABCDE12345", "--apple-development");
         Assert.True(made.Exit == 0, made.Err);
         Assert.Contains("winche configure --url http://localhost --project demo --app clinic-ios", made.Out);
         var list = await Run(null, "apps");
         Assert.Contains("clinic-ios", list.Out);
         Assert.Contains("ABCDE12345.com.example.clinic", list.Out);
-        Assert.Contains("0 verified today", list.Out);
+        Assert.Contains("0 verified today (development builds accepted)", list.Out);
         Assert.Contains("isn't an SDK", (await Run(null, "apps:create", "X", "--sdk", "swift")).Err);
         Assert.Contains("There's already an app clinic-ios", (await Run(null, "apps:create", "Again", "--id", "clinic-ios")).Err);
         Assert.Contains("--web-origin is gone", (await Run(null, "apps:create", "Web", "--web-origin", "https://a.example")).Err);
