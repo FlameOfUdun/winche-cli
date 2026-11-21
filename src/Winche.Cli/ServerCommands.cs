@@ -251,6 +251,10 @@ internal static partial class CliApp
                 name, id = args.Value("id"), sdk = args.Value("sdk") ?? "flutter",
                 androidPackage = args.Value("android-package"), appleBundleId = args.Value("apple-bundle-id"), appleTeamId = args.Value("apple-team-id"),
                 appleDevelopment = args.Flag("apple-development"),
+                androidCloudProjectNumber = args.Value("android-cloud-project") is { } cp ? long.TryParse(cp, out var n) ? n : throw new CliException($"--android-cloud-project {cp}: the Google Cloud project's number.", 2) : (long?)null,
+                androidSideloaded = args.Flag("android-sideloaded"),
+                androidDeviceIntegrity = args.Value("android-device"),
+                androidCertificates = (args.Value("android-certificate") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             };
             var client = await ClientAsync(ct);
             var (status, body) = await client.SendAsync(HttpMethod.Post, "integrity/apps", request, ct);
@@ -283,6 +287,9 @@ internal static partial class CliApp
                 env.Out.WriteLine($"  {product,-16} {mode,-8} {counts}");
             }
             env.Out.WriteLine($"Tokens last {body["tokenMinutes"]} minutes.");
+            if (apps.Any(a => a?["androidPackage"] is not null))
+                env.Out.WriteLine(body["playServiceAccount"]?["email"]?.ToString() is { } email ? $"Play Integrity signs in as {email}."
+                    : body["playServiceAccount"] is JsonObject ? "Play Integrity has a service account." : "Play Integrity has no service account: winche integrity:play-account <key.json>.");
             var tokens = body["debugTokens"]?.AsArray() ?? [];
             env.Out.WriteLine(tokens.Count == 0 ? "No debug tokens." : "Debug tokens:");
             foreach (var t in tokens) env.Out.WriteLine($"  {t!["id"],-18} {t["name"],-24} for {t["app"]}");
@@ -309,6 +316,28 @@ internal static partial class CliApp
             if (status != HttpStatusCode.OK) throw new CliException($"Not changed: {ConsoleClient.ErrorText(body, status)}");
             if (product is not null) env.Out.WriteLine($"{product}: {body["enforcement"]?[product]}.");
             if (minutes is not null) env.Out.WriteLine($"Tokens last {body["tokenMinutes"]} minutes.");
+            return 0;
+        }
+
+        /// <summary>
+        /// <c>winche integrity:play-account &lt;key.json&gt;</c> (or <c>--ref aws-sm:…</c>): the Google service account Play
+        /// Integrity signs in as. Kept as a secret; never shown again.
+        /// </summary>
+        public async Task<int> PlayAccountAsync(string? file, CancellationToken ct)
+        {
+            var reference = args.Value("ref");
+            if ((file is null) == (reference is null)) throw new CliException("Give the service account's key file (winche integrity:play-account key.json) or --ref aws-sm:….", 2);
+            string? value = null;
+            if (file is not null)
+            {
+                var path = Path.GetFullPath(file, env.WorkingDirectory);
+                if (!File.Exists(path)) throw new CliException($"No file {file}.", 2);
+                value = await File.ReadAllTextAsync(path, ct);
+            }
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Put, "integrity/play-service-account", new { value, reference }, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Not set: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine($"Play Integrity signs in as {body["email"]?.ToString() ?? "the service account"}{(reference is null ? "" : $" (read from {reference})")}.");
+            if (file is not null) env.Out.WriteLine($"The project keeps it now: you can delete {file}.");
             return 0;
         }
 

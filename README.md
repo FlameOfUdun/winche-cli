@@ -111,15 +111,17 @@ winche settings pull                                   # settings/database.json,
   } ] }
   ```
 - **Apps:** `winche apps:create <name>` adds an app (`--id`, `--android-package`, `--apple-bundle-id`,
-  `--apple-team-id`, `--apple-development` to accept App Attest keys from development builds; Flutter is the only SDK
-  so far), and prints the `winche configure --app <id>` to run in its
+  `--apple-team-id`, `--apple-development` to accept App Attest keys from development builds; for Play Integrity
+  `--android-cloud-project <number>`, `--android-device basic|device|strong` (default device), `--android-sideloaded`
+  to accept builds from outside Google Play, `--android-certificate <sha256,…>`; Flutter is the only SDK so far), and prints the `winche configure --app <id>` to run in its
   folder. `winche apps` lists them with today's verified requests.
 - **Integrity:** apps prove they're the project's own and send an Integrity token with every request. `winche integrity`
   shows each product's mode (`off`, `monitor`: counted, never refused, the default; `enforce`: refused without a
   token) with today's requests, how long tokens last, and the debug tokens. `winche integrity:set <product>
   off|monitor|enforce -m "why"` changes one (`--token-minutes <30-1440>` for the lifetime).
   `winche integrity:debug-tokens:create <app> <name>` prints a debug token once (for simulators, desktop builds and
-  CI; on stdout alone, for scripts), `integrity:debug-tokens:delete <id>` removes one.
+  CI; on stdout alone, for scripts), `integrity:debug-tokens:delete <id>` removes one. `winche integrity:play-account <key.json>`
+  (or `--ref aws-sm:…`) sets the Google service account Play Integrity signs in as (kept as a secret, never shown again).
 - **Members:** `winche members:add <email> --role Admin|Member|Viewer` (Member by default). In a project made with
   `projects:create`, they become its member; someone new gets an account and a link to set its password. Links are emailed when the server can send email, else printed to pass on.
   `winche members` lists who has access.

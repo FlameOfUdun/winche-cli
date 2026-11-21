@@ -40,13 +40,16 @@ internal static partial class CliApp
           apps                 The project's apps (Integrity), with today's verified requests
           apps:create <name>   Add an app (--id, --sdk flutter, --android-package, --apple-bundle-id,
                                --apple-team-id, --apple-development to accept App Attest from development
-                               builds); then winche configure --app <id>
+                               builds, --android-cloud-project <number>, --android-device basic|device|strong,
+                               --android-sideloaded, --android-certificate <sha256,…>); then winche configure --app <id>
           integrity            Each product's Integrity mode and today's requests, token lifetime, debug tokens
           integrity:set <product> off|monitor|enforce
                                How a product treats requests without a valid Integrity token (-m why;
                                --token-minutes <30-1440> for how long tokens last)
           integrity:debug-tokens:create <app> <name>
                                A debug token for simulators, desktop builds or CI (printed once)
+          integrity:play-account <key.json>
+                               The Google service account Play Integrity signs in as (or --ref aws-sm:…)
           integrity:debug-tokens:delete <id>
                                Remove one: the Integrity tokens it got stop working
           members              Who can use the project, and as what
@@ -230,6 +233,7 @@ internal static partial class CliApp
                 "integrity:set" => await run.IntegritySetAsync(a.Positional.ElementAtOrDefault(1), a.Positional.ElementAtOrDefault(2), ct),
                 "integrity:debug-tokens:create" => await run.DebugTokenCreateAsync(a.Positional.ElementAtOrDefault(1), a.Positional.ElementAtOrDefault(2), ct),
                 "integrity:debug-tokens:delete" => await run.DebugTokenDeleteAsync(Arg(1), ct),
+                "integrity:play-account" => await run.PlayAccountAsync(a.Positional.ElementAtOrDefault(1), ct),
                 "members" => await run.MembersListAsync(ct),
                 "members:add" => await run.MembersAddAsync(a.Positional.ElementAtOrDefault(1), ct),
                 "members:remove" => await run.MembersRemoveAsync(Arg(1), ct),
@@ -1315,10 +1319,10 @@ internal static partial class CliApp
 internal sealed class Args
 {
     private static readonly HashSet<string> Flags = ["dry-run", "force", "stdout", "help", "version", "skip-tests", "yes", "clear", "quiet", "verbose", "reauth", "no-browser", "no-build",
-        "rotate", "path-style", "finish", "cancel", "keep-old", "follow", "remove-secrets", "apple-development"];
+        "rotate", "path-style", "finish", "cancel", "keep-old", "follow", "remove-secrets", "apple-development", "android-sideloaded"];
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "folder", "title", "role", "issuer", "subject", "audience", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
-        "role", "sdk", "android-package", "apple-bundle-id", "apple-team-id", "web-origin", "token-minutes",
+        "role", "sdk", "android-package", "apple-bundle-id", "apple-team-id", "web-origin", "token-minutes", "android-cloud-project", "android-device", "android-certificate",
         "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel",
         "ref", "access-key-id"];
     /// <summary>Options that may be given more than once (--set KEY=value --set …).</summary>

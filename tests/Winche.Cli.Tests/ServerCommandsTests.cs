@@ -328,6 +328,32 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Play_Integrity_is_set_up_from_the_terminal()
+    {
+        await SetupAsync();
+        var made = await Run(null, "apps:create", "Clinic Android", "--id", "clinic-android", "--android-package", "com.example.clinic",
+            "--android-cloud-project", "123456789012", "--android-device", "strong", "--android-sideloaded");
+        Assert.True(made.Exit == 0, made.Err);
+        Assert.Contains("--android-cloud-project nope", (await Run(null, "apps:create", "X", "--android-cloud-project", "nope")).Err);
+        Assert.Contains("basic, device or strong", (await Run(null, "apps:create", "Y", "--android-package", "com.example.y", "--android-device", "great")).Err);
+        Assert.Contains("no service account", (await Run(null, "integrity")).Out);
+
+        Assert.Contains("Give the service account's key file", (await Run(null, "integrity:play-account")).Err);
+        await File.WriteAllTextAsync(Path.Combine(_dir, "bad.json"), "{\"type\":\"authorized_user\"}");
+        Assert.Contains("isn't a Google service account's key file", (await Run(null, "integrity:play-account", "bad.json")).Err);
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        await File.WriteAllTextAsync(Path.Combine(_dir, "key.json"), System.Text.Json.JsonSerializer.Serialize(new
+        {
+            type = "service_account", client_email = "integrity@clinic.iam.gserviceaccount.com", private_key = rsa.ExportPkcs8PrivateKeyPem(),
+        }));
+        var set = await Run(null, "integrity:play-account", "key.json");
+        Assert.True(set.Exit == 0, set.Err);
+        Assert.Contains("Play Integrity signs in as integrity@clinic.iam.gserviceaccount.com", set.Out);
+        Assert.Contains("you can delete key.json", set.Out);
+        Assert.Contains("Play Integrity signs in as integrity@clinic.iam.gserviceaccount.com", (await Run(null, "integrity")).Out);
+    }
+
+    [Fact]
     public async Task Members_are_invited_or_given_a_role_in_the_first_project()
     {
         await SetupAsync();
