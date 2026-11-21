@@ -280,18 +280,51 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Apps_are_registered_and_listed_from_the_terminal()
+    public async Task Apps_are_added_and_listed_from_the_terminal()
     {
         await SetupAsync();
-        Assert.Contains("No apps registered", (await Run(null, "apps")).Out);
-        var made = await Run(null, "apps:create", "Clinic iOS", "--id", "clinic-ios", "--apple-bundle-id", "com.example.clinic", "--web-origin", "https://a.example, https://b.example");
+        Assert.Contains("No apps yet", (await Run(null, "apps")).Out);
+        var made = await Run(null, "apps:create", "Clinic iOS", "--id", "clinic-ios", "--apple-bundle-id", "com.example.clinic", "--apple-team-id", "ABCDE12345");
         Assert.True(made.Exit == 0, made.Err);
         Assert.Contains("winche configure --url http://localhost --project demo --app clinic-ios", made.Out);
         var list = await Run(null, "apps");
         Assert.Contains("clinic-ios", list.Out);
-        Assert.Contains("com.example.clinic, https://a.example, https://b.example", list.Out);
+        Assert.Contains("ABCDE12345.com.example.clinic", list.Out);
+        Assert.Contains("0 verified today", list.Out);
         Assert.Contains("isn't an SDK", (await Run(null, "apps:create", "X", "--sdk", "swift")).Err);
         Assert.Contains("There's already an app clinic-ios", (await Run(null, "apps:create", "Again", "--id", "clinic-ios")).Err);
+        Assert.Contains("--web-origin is gone", (await Run(null, "apps:create", "Web", "--web-origin", "https://a.example")).Err);
+    }
+
+    [Fact]
+    public async Task Integrity_is_set_per_product_and_debug_tokens_are_made_and_removed_from_the_terminal()
+    {
+        await SetupAsync();
+        var shown = await Run(null, "integrity");
+        Assert.Contains("authentication", shown.Out);
+        Assert.Contains("monitor", shown.Out);
+        Assert.Contains("Tokens last 60 minutes", shown.Out);
+        // Enforcing needs an app; a mode is one of three; a reason goes in the history.
+        Assert.Contains("Add an app before", (await Run(null, "integrity:set", "database", "enforce", "-m", "Lock")).Err);
+        Assert.Contains("off|monitor|enforce", (await Run(null, "integrity:set", "database", "loud", "-m", "x")).Err);
+        await Run(null, "apps:create", "Clinic", "--id", "clinic-app");
+        var set = await Run(null, "integrity:set", "database", "enforce", "-m", "Only our apps");
+        Assert.True(set.Exit == 0, set.Err);
+        Assert.Contains("database: enforce.", set.Out);
+        Assert.Contains("Tokens last 120 minutes", (await Run(null, "integrity:set", "--token-minutes", "120", "-m", "Longer")).Out);
+        Assert.Contains("enforce", (await Run(null, "integrity")).Out);
+
+        // A debug token: printed once (alone on stdout, for scripts), listed by name after.
+        var made = await Run(null, "integrity:debug-tokens:create", "clinic-app", "CI");
+        Assert.True(made.Exit == 0, made.Err);
+        Assert.StartsWith("wdt_", made.Out.Trim());
+        Assert.Contains("isn't shown again", made.Err);
+        var listed = await Run(null, "integrity");
+        Assert.Contains("CI", listed.Out);
+        Assert.DoesNotContain(made.Out.Trim(), listed.Out);
+        var id = listed.Out.Split('\n').Select(l => l.Trim()).First(l => l.StartsWith("dt-")).Split(' ')[0];
+        Assert.Contains($"Removed the debug token {id}", (await Run(null, "integrity:debug-tokens:delete", id, "--yes")).Out);
+        Assert.Contains("No debug tokens", (await Run(null, "integrity")).Out);
     }
 
     [Fact]

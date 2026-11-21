@@ -37,9 +37,17 @@ internal static partial class CliApp
           projects             The projects on the console's Winche Server that you can use
           projects:create <id> Make a project (server admins; --name, and --db-name/--db-host/--db-port/--db-user/
                                --db-ssl with WINCHE_DB_PASSWORD for a database elsewhere)
-          apps                 The project's registered apps
-          apps:create <name>   Register an app (--id, --sdk flutter, --android-package, --apple-bundle-id,
-                               --web-origin, comma-separated); then winche configure --app <id>
+          apps                 The project's apps (Integrity), with today's verified requests
+          apps:create <name>   Add an app (--id, --sdk flutter, --android-package, --apple-bundle-id,
+                               --apple-team-id); then winche configure --app <id>
+          integrity            Each product's Integrity mode and today's requests, token lifetime, debug tokens
+          integrity:set <product> off|monitor|enforce
+                               How a product treats requests without a valid Integrity token (-m why;
+                               --token-minutes <30-1440> for how long tokens last)
+          integrity:debug-tokens:create <app> <name>
+                               A debug token for simulators, desktop builds or CI (printed once)
+          integrity:debug-tokens:delete <id>
+                               Remove one: the Integrity tokens it got stop working
           members              Who can use the project, and as what
           members:add <email>  Add someone (--role Admin|Member|Viewer, default Member); new people get a link
                                to set their password (emailed when the server can send email)
@@ -217,6 +225,10 @@ internal static partial class CliApp
                 "products" => await run.ProductsAsync(ct),
                 "apps" => await run.AppsListAsync(ct),
                 "apps:create" => await run.AppsCreateAsync(a.Positional.ElementAtOrDefault(1), ct),
+                "integrity" => await run.IntegrityAsync(ct),
+                "integrity:set" => await run.IntegritySetAsync(a.Positional.ElementAtOrDefault(1), a.Positional.ElementAtOrDefault(2), ct),
+                "integrity:debug-tokens:create" => await run.DebugTokenCreateAsync(a.Positional.ElementAtOrDefault(1), a.Positional.ElementAtOrDefault(2), ct),
+                "integrity:debug-tokens:delete" => await run.DebugTokenDeleteAsync(Arg(1), ct),
                 "members" => await run.MembersListAsync(ct),
                 "members:add" => await run.MembersAddAsync(a.Positional.ElementAtOrDefault(1), ct),
                 "members:remove" => await run.MembersRemoveAsync(Arg(1), ct),
@@ -688,7 +700,7 @@ internal static partial class CliApp
             env.Out.WriteLine($"Wrote {Path.GetRelativePath(env.WorkingDirectory, target)} for project {setup.ProjectId} at {setup.BaseUrl}");
             env.Out.WriteLine(setup.App is { } registered
                 ? $"  app:       {registered.Name} ({registered.Id})"
-                : "  app:       none (register it: winche apps:create <name>, then run this again with --app <its id>)");
+                : "  app:       none (add it: winche apps:create <name>, then run this again with --app <its id>)");
             env.Out.WriteLine($"  platforms: {string.Join(", ", platforms)}");
             env.Out.WriteLine($"  services:  {(setup.Services.Count == 0 ? "none" : string.Join(", ", setup.Services.Select(s => s.Id)))}");
             if (setup.Providers.Where(p => p.ClientIds.Count > 1).Select(p => p.Name).ToList() is { Count: > 0 } several)
@@ -1305,7 +1317,7 @@ internal sealed class Args
         "rotate", "path-style", "finish", "cancel", "keep-old", "follow", "remove-secrets"];
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "folder", "title", "role", "issuer", "subject", "audience", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
-        "role", "sdk", "android-package", "apple-bundle-id", "web-origin",
+        "role", "sdk", "android-package", "apple-bundle-id", "apple-team-id", "web-origin", "token-minutes",
         "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel",
         "ref", "access-key-id"];
     /// <summary>Options that may be given more than once (--set KEY=value --set …).</summary>

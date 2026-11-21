@@ -37,7 +37,8 @@ winche rules pull                                        # write the live rules 
 winche projects                                          # the projects on the console's Winche Server
 winche projects:create wards --name Wards                # another project (server admins)
 winche products:start database storage                   # start products, following their setup
-winche apps:create "Clinic iOS" --apple-bundle-id com.example.clinic   # register an app (also: winche apps)
+winche apps:create "Clinic iOS" --apple-bundle-id com.example.clinic --apple-team-id ABCDE12345   # add an app (also: winche apps)
+winche integrity:set database enforce -m "Our apps send tokens"   # Integrity per product (also: winche integrity)
 winche members:add ann@example.com --role Member         # give someone access (also: winche members)
 winche settings pull                                     # the project's settings into settings/*.json (also diff, deploy)
 winche accounts:create gitlab-main --scopes rules,indexes  # a service account for CI (accounts, accounts:keys:add, accounts:trust)
@@ -109,9 +110,15 @@ winche settings pull                                   # settings/database.json,
       "do": { "kind": "webhook", "url": "https://example.com/hooks/users" }
   } ] }
   ```
-- **Apps:** `winche apps:create <name>` registers an app (`--id`, `--android-package`, `--apple-bundle-id`,
-  `--web-origin a,b`; Flutter is the only SDK so far), and prints the `winche configure --app <id>` to run in its
-  folder. `winche apps` lists them.
+- **Apps:** `winche apps:create <name>` adds an app (`--id`, `--android-package`, `--apple-bundle-id`,
+  `--apple-team-id`; Flutter is the only SDK so far), and prints the `winche configure --app <id>` to run in its
+  folder. `winche apps` lists them with today's verified requests.
+- **Integrity:** apps prove they're the project's own and send an Integrity token with every request. `winche integrity`
+  shows each product's mode (`off`, `monitor`: counted, never refused, the default; `enforce`: refused without a
+  token) with today's requests, how long tokens last, and the debug tokens. `winche integrity:set <product>
+  off|monitor|enforce -m "why"` changes one (`--token-minutes <30-1440>` for the lifetime).
+  `winche integrity:debug-tokens:create <app> <name>` prints a debug token once (for simulators, desktop builds and
+  CI; on stdout alone, for scripts), `integrity:debug-tokens:delete <id>` removes one.
 - **Members:** `winche members:add <email> --role Admin|Member|Viewer` (Member by default). In a project made with
   `projects:create`, they become its member; someone new gets an account and a link to set its password. Links are emailed when the server can send email, else printed to pass on.
   `winche members` lists who has access.
@@ -161,8 +168,8 @@ winche configure --url https://api.example.com --app app-xxxxxxxxxxxx   # or WIN
 reads the server's public setup (`/.well-known/winche`: which services it runs and where, and the sign-in providers'
 client ids) and writes `lib/winche_options.dart`, with a `DefaultWincheOptions` for each platform folder the app has
 (`--platforms android,ios,web` to choose, `--out` to write elsewhere). `--app` is the app's id from the console
-(Project settings → Your apps): it goes in the file as `appId`, the SDK sends it with every request, and the console
-counts each app's requests (and can refuse apps that aren't registered). Then:
+(**Integrity**, or `winche apps`): it goes in the file as `appId`, and the SDK uses it to get the app's Integrity
+tokens. Then:
 
 ```dart
 final app = await WincheFlutter.initializeApp(options: DefaultWincheOptions.currentPlatform);

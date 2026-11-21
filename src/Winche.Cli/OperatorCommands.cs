@@ -99,8 +99,8 @@ internal static partial class CliApp
         public async Task<int> AppsDeleteAsync(string? id, CancellationToken ct)
         {
             id = Ask("App id", id, option: "the id: winche apps:delete <id> (see winche apps)");
-            Confirm($"Remove the app {id}? Its options stop identifying it to the server.");
-            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Delete, $"apps/registered/{Uri.EscapeDataString(id)}", null, ct);
+            Confirm($"Remove the app {id}? Its Integrity and debug tokens stop working; where a product is enforced, copies of it are refused.");
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Delete, $"integrity/apps/{Uri.EscapeDataString(id)}", null, ct);
             if (status == HttpStatusCode.NotFound) throw new CliException($"No app {id}. See: winche apps");
             if (status != HttpStatusCode.NoContent) throw new CliException($"Not removed: {ConsoleClient.ErrorText(body, status)}");
             env.Out.WriteLine($"Removed the app {id}.");

@@ -222,41 +222,114 @@ internal static partial class CliApp
 
         // ----- apps --------------------------------------------------------------------------------
 
-        /// <summary><c>winche apps</c>: the project's registered apps.</summary>
+        /// <summary><c>winche apps</c>: the project's apps (Integrity), each with today's verified requests.</summary>
         public async Task<int> AppsListAsync(CancellationToken ct)
         {
-            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "apps/registered", null, ct);
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "integrity", null, ct);
             if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
             var apps = body["apps"]?.AsArray() ?? [];
-            if (apps.Count == 0) env.Out.WriteLine("No apps registered. Register one: winche apps:create <name> --android-package … --apple-bundle-id …");
+            if (apps.Count == 0) env.Out.WriteLine("No apps yet. Add one: winche apps:create <name> --android-package … --apple-bundle-id … --apple-team-id …");
             foreach (var a in apps)
             {
-                var where = new[] { a!["androidPackage"]?.ToString(), a["appleBundleId"]?.ToString() }
-                    .Concat(a["webOrigins"]?.AsArray().Select(o => o?.ToString()) ?? []).Where(x => !string.IsNullOrEmpty(x));
-                env.Out.WriteLine($"  {a["id"],-24} {a["name"],-20} {a["sdk"],-8} {string.Join(", ", where)}");
+                var apple = a!["appleBundleId"]?.ToString() is { Length: > 0 } bundle ? (a["appleTeamId"]?.ToString() is { Length: > 0 } team ? $"{team}.{bundle}" : bundle) : null;
+                var where = new[] { a["androidPackage"]?.ToString(), apple }.Where(x => !string.IsNullOrEmpty(x));
+                var today = a["usage"]?.AsObject().Sum(u => u.Value?["today"]?.GetValue<long>() ?? 0) ?? 0;
+                env.Out.WriteLine($"  {a["id"],-24} {a["name"],-20} {a["sdk"],-8} {string.Join(", ", where),-44} {today} verified today");
             }
-            if (body["registeredOnly"]?.GetValue<bool>() == true) env.Out.WriteLine("Only registered apps may call this project.");
             return 0;
         }
 
-        /// <summary><c>winche apps:create &lt;name&gt;</c>: registers an app, then <c>winche configure --app &lt;id&gt;</c> writes its options.</summary>
+        /// <summary><c>winche apps:create &lt;name&gt;</c>: adds an app, then <c>winche configure --app &lt;id&gt;</c> writes its options.</summary>
         public async Task<int> AppsCreateAsync(string? name, CancellationToken ct)
         {
             name = Ask("App name", name, option: "the name: winche apps:create <name>");
-            var origins = (args.Value("web-origin") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (args.Value("web-origin") is not null) throw new CliException("--web-origin is gone: any web page may call the project; Integrity decides which apps get in.", 2);
             var request = new
             {
                 name, id = args.Value("id"), sdk = args.Value("sdk") ?? "flutter",
-                androidPackage = args.Value("android-package"), appleBundleId = args.Value("apple-bundle-id"), webOrigins = origins,
+                androidPackage = args.Value("android-package"), appleBundleId = args.Value("apple-bundle-id"), appleTeamId = args.Value("apple-team-id"),
             };
             var client = await ClientAsync(ct);
-            var (status, body) = await client.SendAsync(HttpMethod.Post, "apps/registered", request, ct);
-            if (status != HttpStatusCode.OK) throw new CliException($"Not registered: {ConsoleClient.ErrorText(body, status)}");
+            var (status, body) = await client.SendAsync(HttpMethod.Post, "integrity/apps", request, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Not added: {ConsoleClient.ErrorText(body, status)}");
             var id = body["id"]!.GetValue<string>();
             var server = ConsoleUrl().GetLeftPart(UriPartial.Authority);
             var project = ConsoleAddress.ProjectOf(Target().Url) is { } p ? $" --project {p}" : "";
-            env.Out.WriteLine($"Registered the app {name} ({id}).");
+            env.Out.WriteLine($"Added the app {name} ({id}).");
             env.Out.WriteLine($"In the app's folder: winche configure --url {server}{project} --app {id}");
+            return 0;
+        }
+
+        // ----- integrity ---------------------------------------------------------------------------
+
+        private static readonly string[] IntegrityModes = ["off", "monitor", "enforce"];
+
+        /// <summary><c>winche integrity</c>: each product's mode with today's requests, how long tokens last, and the debug tokens.</summary>
+        public async Task<int> IntegrityAsync(CancellationToken ct)
+        {
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Get, "integrity", null, ct);
+            if (status != HttpStatusCode.OK) throw new CliException(ConsoleClient.ErrorText(body, status));
+            if (body["available"]?.GetValue<bool>() != true) { env.Out.WriteLine("Integrity isn't set up on this console (it comes with project setup)."); return 0; }
+            if (body["canSign"]?.GetValue<bool>() != true) env.Out.WriteLine("This server has no master key: it can't make Integrity tokens.");
+            var apps = body["apps"]?.AsArray() ?? [];
+            long Verified(string product) => apps.Sum(a => a?["usage"]?[product]?["today"]?.GetValue<long>() ?? 0);
+            foreach (var product in body["products"]?.AsArray().Select(p => p!.ToString()) ?? [])
+            {
+                var mode = body["enforcement"]?[product]?.ToString() ?? "monitor";
+                var counts = mode == "off" ? "not counted" : $"today {Verified(product)} verified, {body["unverified"]?[product]?["today"]?.GetValue<long>() ?? 0} without a token";
+                env.Out.WriteLine($"  {product,-16} {mode,-8} {counts}");
+            }
+            env.Out.WriteLine($"Tokens last {body["tokenMinutes"]} minutes.");
+            var tokens = body["debugTokens"]?.AsArray() ?? [];
+            env.Out.WriteLine(tokens.Count == 0 ? "No debug tokens." : "Debug tokens:");
+            foreach (var t in tokens) env.Out.WriteLine($"  {t!["id"],-18} {t["name"],-24} for {t["app"]}");
+            return 0;
+        }
+
+        /// <summary>
+        /// <c>winche integrity:set &lt;product&gt; off|monitor|enforce</c> (or <c>--token-minutes &lt;n&gt;</c> alone), with
+        /// <c>--reason</c> for the history.
+        /// </summary>
+        public async Task<int> IntegritySetAsync(string? product, string? mode, CancellationToken ct)
+        {
+            var minutes = args.Value("token-minutes") is { } m ? int.TryParse(m, out var n) ? n : throw new CliException($"--token-minutes {m}: a number of minutes (30 to 1440).", 2) : (int?)null;
+            if (product is null && minutes is null) throw new CliException("Say what to change: winche integrity:set <product> off|monitor|enforce, or --token-minutes <n>.", 2);
+            var enforcement = new Dictionary<string, string>();
+            if (product is not null)
+            {
+                mode = mode?.ToLowerInvariant();
+                if (mode is null || !IntegrityModes.Contains(mode)) throw new CliException($"Say the mode: winche integrity:set {product} off|monitor|enforce.", 2);
+                enforcement[product] = mode;
+            }
+            var reason = args.Value("message") ?? Ask("Why (for the history)", null, option: "-m \"…\"");
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Put, "integrity/enforcement", new { enforcement, tokenMinutes = minutes, reason }, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Not changed: {ConsoleClient.ErrorText(body, status)}");
+            if (product is not null) env.Out.WriteLine($"{product}: {body["enforcement"]?[product]}.");
+            if (minutes is not null) env.Out.WriteLine($"Tokens last {body["tokenMinutes"]} minutes.");
+            return 0;
+        }
+
+        /// <summary><c>winche integrity:debug-tokens:create &lt;app&gt; &lt;name&gt;</c>: prints the token, this once.</summary>
+        public async Task<int> DebugTokenCreateAsync(string? app, string? name, CancellationToken ct)
+        {
+            app = Ask("App id", app, option: "the app: winche integrity:debug-tokens:create <app> <name> (see winche apps)");
+            name = Ask("Name (where it's used: CI, a simulator)", name, option: "the name: winche integrity:debug-tokens:create <app> <name>");
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Post, "integrity/debug-tokens", new { app, name }, ct);
+            if (status != HttpStatusCode.OK) throw new CliException($"Not made: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine(body["token"]!.GetValue<string>());
+            env.Error.WriteLine($"The debug token {name} for {app} ({body["id"]}): it isn't shown again. Keep it like a password; never ship it in a release build.");
+            return 0;
+        }
+
+        /// <summary><c>winche integrity:debug-tokens:delete &lt;id&gt;</c>: the Integrity tokens it got stop working.</summary>
+        public async Task<int> DebugTokenDeleteAsync(string? id, CancellationToken ct)
+        {
+            id = Ask("Debug token id", id, option: "the id: winche integrity:debug-tokens:delete <id> (see winche integrity)");
+            Confirm($"Remove the debug token {id}? The Integrity tokens it got stop working at once.");
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Delete, $"integrity/debug-tokens/{Uri.EscapeDataString(id)}", null, ct);
+            if (status == HttpStatusCode.NotFound) throw new CliException($"No debug token {id}. See: winche integrity");
+            if (status != HttpStatusCode.NoContent) throw new CliException($"Not removed: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine($"Removed the debug token {id}.");
             return 0;
         }
 
