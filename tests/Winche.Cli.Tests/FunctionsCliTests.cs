@@ -63,7 +63,7 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
                 "/console/v1/projects/demo/functions/deploy" => (DeployAnswer, DeployReply),
                 "/console/v1/projects/demo/tokens/current" => (HttpStatusCode.NoContent, ""),
                 "/console/v1/projects/demo/functions/secrets" => (HttpStatusCode.OK, """{ "available": true, "secrets": [{ "name": "MAIL_KEY", "isSet": true, "setAt": "2026-11-12T20:00:00Z", "setBy": "ann@example.com", "usedBy": ["sendReport"] }, { "name": "SA_JSON", "isSet": false, "setAt": null, "setBy": null, "usedBy": [] }] }"""),
-                "/console/v1/projects/demo/functions/secrets/MAIL_KEY" or "/console/v1/projects/demo/functions/secrets/SA_JSON" => (HttpStatusCode.NoContent, ""),
+                "/console/v1/projects/demo/functions/secrets/MAIL_KEY" or "/console/v1/projects/demo/functions/secrets/SA_JSON" or "/console/v1/projects/demo/functions/secrets/MAIL_KEY/move" => (HttpStatusCode.NoContent, ""),
                 "/console/v1/projects/demo/auth/settings/signin" => (HttpStatusCode.OK, """{ "available": true, "settings": {}, "version": { "number": 1 }, "smtpPassword": { "setAt": "2026-11-10T09:00:00Z", "setBy": "bob@example.com", "reference": null }, "syncSecrets": {} }"""),
                 "/console/v1/projects/demo/secrets/sources" => (HttpStatusCode.OK, """
                     { "available": true, "appCredentials": false,
@@ -225,6 +225,24 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         var put = console.Requests.Last();
         Assert.Equal((HttpMethod.Put, "/console/v1/projects/demo/functions/secrets/MAIL_KEY", "k-123"), (put.Method, put.Path, JsonNode.Parse(put.Body!)!["value"]!.GetValue<string>()));
         Assert.Contains("Set MAIL_KEY.", output);
+
+        // Kept in AWS by Winche, or moved there.
+        (exit, output, err) = await Run(console, v => v == "WINCHE_SECRET" ? "k-456" : Ci(v), "secrets:set", "MAIL_KEY", "--in", "aws-sm");
+        Assert.True(exit == 0, err);
+        var kept = JsonNode.Parse(console.Requests.Last().Body!)!;
+        Assert.Equal(("k-456", "keep:aws-sm"), (kept["value"]!.GetValue<string>(), kept["reference"]!.GetValue<string>()));
+        Assert.Contains("kept in AWS Secrets Manager", output);
+        (exit, _, err) = await Run(console, v => v == "WINCHE_SECRET" ? "k" : Ci(v), "secrets:set", "MAIL_KEY", "--in", "vault");
+        Assert.Equal(2, exit);
+        Assert.Contains("aws-sm (Secrets Manager) or aws-ssm", err);
+        (exit, output, err) = await Run(console, Ci, "secrets:move", "MAIL_KEY", "--to", "aws-ssm");
+        Assert.True(exit == 0, err);
+        var move = console.Requests.Last();
+        Assert.Equal((HttpMethod.Post, "/console/v1/projects/demo/functions/secrets/MAIL_KEY/move", "aws-ssm"), (move.Method, move.Path, JsonNode.Parse(move.Body!)!["store"]!.GetValue<string>()));
+        Assert.Contains("Moved MAIL_KEY to AWS Parameter Store", output);
+        (exit, _, err) = await Run(console, Ci, "secrets:move", "MAIL_KEY");
+        Assert.Equal(2, exit);
+        Assert.Contains("--to aws-sm", err);
 
         File.WriteAllText(Path.Combine(_dir, "sa.json"), """{ "type": "service_account" }""");
         (exit, _, err) = await Run(console, Ci, "functions", "secrets:set", "SA_JSON", "--from-file", "sa.json");   // the old name still works

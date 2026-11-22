@@ -235,10 +235,35 @@ internal static partial class CliApp
             else value = env.GetVariable("WINCHE_SECRET") ?? (env.Interactive ? SecretValue(name) : throw new CliException("Set WINCHE_SECRET or use --from-file: there's no terminal to ask in.", 2));
             if (value.Length == 0) throw new CliException("The value is empty. To remove the secret: winche secrets:remove " + name, 2);
             var client = await ClientAsync(ct);
+            if (KeepIn() is { } store)
+            {
+                await OkAsync(client.SendAsync(HttpMethod.Put, $"functions/secrets/{name}", new { value, reference = "keep:" + store }, ct), "Not set");
+                env.Out.WriteLine($"Set {name}: kept in {StoreTitle(store)}. Functions get it from their next run.");
+                return 0;
+            }
             await OkAsync(client.SendAsync(HttpMethod.Put, $"functions/secrets/{name}", new { value }, ct), "Not set");
             env.Out.WriteLine($"Set {name}. Functions get it from their next run.");
             return 0;
         }
+
+        /// <summary><c>winche secrets:move NAME --to aws-sm|aws-ssm</c>: a value kept on the server moves into AWS.</summary>
+        public async Task<int> FunctionSecretMoveAsync(string name, CancellationToken ct)
+        {
+            CheckSecretName(name);
+            var store = args.Value("to") is { } to ? Store(to) : throw new CliException("Say where to: --to aws-sm (Secrets Manager) or --to aws-ssm (Parameter Store).", 2);
+            var client = await ClientAsync(ct);
+            await OkAsync(client.SendAsync(HttpMethod.Post, $"functions/secrets/{name}/move", new { store }, ct), "Not moved");
+            env.Out.WriteLine($"Moved {name} to {StoreTitle(store)}: only where it is is kept on the server now.");
+            return 0;
+        }
+
+        /// <summary><c>--in aws-sm|aws-ssm</c>: keep the value in AWS rather than on the server.</summary>
+        private string? KeepIn() => args.Value("in") is { } i ? Store(i) : null;
+
+        private static string Store(string s) => s.Trim().ToLowerInvariant() is var v && v is "aws-sm" or "aws-ssm" ? v
+            : throw new CliException($"'{s}' isn't somewhere Winche keeps secrets: aws-sm (Secrets Manager) or aws-ssm (Parameter Store).", 2);
+
+        private static string StoreTitle(string s) => s == "aws-sm" ? "AWS Secrets Manager" : "AWS Parameter Store";
 
         /// <summary><c>winche secrets:remove NAME</c> (or the old <c>functions secrets:remove</c>).</summary>
         public async Task<int> FunctionSecretRemoveAsync(string name, CancellationToken ct)
@@ -327,7 +352,14 @@ internal static partial class CliApp
                 case "sources":
                     var sources = info["sources"]?.AsArray() ?? [];
                     if (sources.Count == 0) { env.Out.WriteLine("This server reads secrets from no other place: each is a value kept on it."); return 0; }
-                    foreach (var s in sources) env.Out.WriteLine($"  {s!["name"] + ":",-10} {s["title"]}: {s["hint"]}");
+                    foreach (var s in sources)
+                    {
+                        env.Out.WriteLine($"  {s!["name"] + ":",-10} {s["title"]}: {s["hint"]}");
+                        if (s["access"] is { } a)
+                            env.Out.WriteLine($"  {"",-10} {(a["problem"]?.GetValue<string>() is { } why ? $"can't be asked: {why}"
+                                : $"the key may {string.Join(", ", new[] { ("read", "read"), ("write", "write"), ("delete", "delete") }.Where(r => a[r.Item1]?.GetValue<bool>() == true).Select(r => r.Item2).DefaultIfEmpty("do nothing"))}"
+                                  + (a["missing"]?.AsArray() is { Count: > 0 } m ? $" (missing {string.Join(", ", m.Select(x => x!.GetValue<string>()))})" : ""))}");
+                    }
                     foreach (var k in keys)
                         env.Out.WriteLine($"  key {KeyShortName(k!),-6} the project's {k["title"]}: {(k["isSet"]?.GetValue<bool>() == true ? $"set {k["setAt"]!.GetValue<DateTimeOffset>():yyyy-MM-dd} by {k["setBy"]}" : "not set")}");
                     env.Out.WriteLine(info["appCredentials"]?.GetValue<bool>() == true

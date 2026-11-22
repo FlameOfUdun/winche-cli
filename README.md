@@ -46,7 +46,9 @@ winche logs -f                                           # the project's logs, t
 winche users                                             # your apps' users (users:disable, users:enable, users:sign-out)
 winche secrets                                           # the project's secrets: functions' and plugins', and the products' own
 winche secrets:set MAIL_KEY                              # add or replace one, typed unseen or from WINCHE_SECRET (or --ref aws-ssm:/app/key)
-winche secrets:sources                                   # where secrets can be read from (AWS), the project's own key (secrets:key aws, secrets:test)
+winche secrets:set MAIL_KEY --in aws-sm                  # kept in AWS by Winche (Secrets Manager; aws-ssm: Parameter Store)
+winche secrets:move MAIL_KEY --to aws-sm                 # move a value kept on the server into AWS
+winche secrets:sources                                   # where secrets can be read from (AWS), what the key may do there, the project's own key (secrets:key aws, secrets:test)
 winche storage:move --bucket files --region eu-west-1 …  # move the project's files to a bucket (data:move: its database)
 winche login:approve BCDF-GHJK                           # allow a CLI waiting with --no-browser, as you
 winche server settings pull                              # the server's own settings as files (server admins)

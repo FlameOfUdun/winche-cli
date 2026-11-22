@@ -71,7 +71,9 @@ internal static partial class CliApp
           secrets:set <name>   Add or replace one: a functions or plugin secret by its NAME (MAIL_KEY, SMS__AUTH_TOKEN), or
                                smtp-password, keycloak-sync --provider <name>. The value from WINCHE_SECRET, --from-file
                                <path>, or typed unseen; or --ref aws-sm:<ARN or name>[#field] | aws-ssm:<parameter>: read
-                               from AWS instead
+                               from AWS instead; or --in aws-sm | aws-ssm: the value kept in AWS by Winche
+          secrets:move <NAME> --to aws-sm | aws-ssm
+                               Move a value kept on the server into AWS
           secrets:remove <NAME>
                                Remove a functions or plugin secret
           secrets:sources      Where secrets can be read from besides the server, and the project's own keys for them
@@ -254,6 +256,7 @@ internal static partial class CliApp
                 "secrets:sources" => await run.SecretSourcesAsync("sources", null, ct),
                 "secrets:key" => await run.SecretSourcesAsync("key", Arg(1), ct),
                 "secrets:test" => await run.SecretSourcesAsync("test", Arg(1), ct),
+                "secrets:move" => await run.FunctionSecretMoveAsync(Arg(1) ?? throw new CliException("Usage: winche secrets:move <NAME> --to aws-sm | aws-ssm", 2), ct),
                 "webhooks:secret" => await run.WebhookSecretAsync(Arg(1), ct),
                 "server settings pull" or "server settings diff" or "server settings deploy" => await run.ServerSettingsAsync(Arg(2)!, ct),
                 "server secrets" => await run.ServerSecretsAsync(null, ct),
@@ -1332,7 +1335,7 @@ internal sealed class Args
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
         "role", "sdk", "android-package", "apple-bundle-id", "apple-team-id", "web-origin", "token-minutes", "integrity", "android-cloud-project", "android-device", "android-certificate", "web-site-key", "web-hostname",
         "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel",
-        "ref", "access-key-id"];
+        "ref", "access-key-id", "in"];
     /// <summary>Options that may be given more than once (--set KEY=value --set …).</summary>
     private static readonly HashSet<string> Repeated = ["set"];
     private static readonly Dictionary<string, string> Short = new() { ["-m"] = "message", ["-h"] = "help", ["-y"] = "yes", ["-P"] = "project", ["-f"] = "follow" };
