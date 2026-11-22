@@ -302,7 +302,7 @@ internal static partial class CliApp
 
         /// <summary>
         /// <c>winche integrity:set &lt;product&gt; off|monitor|enforce</c> (or <c>--token-minutes &lt;n&gt;</c> alone), with
-        /// <c>--reason</c> for the history.
+        /// <c>-m</c> / <c>--message</c> for the history.
         /// </summary>
         public async Task<int> IntegritySetAsync(string? product, string? mode, CancellationToken ct)
         {

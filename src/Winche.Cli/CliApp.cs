@@ -62,7 +62,7 @@ internal static partial class CliApp
           products:start <p>…  Start products (database, storage, authentication, functions, assets) and follow their setup
           members:remove <email>  Take someone's access away (off the project's members)
           invites, invites:revoke <email>  Pending invites (an app's own console; a server's projects use members:add)
-          apps:delete <id>     Remove a registered app
+          apps:delete <id>     Remove an app (Integrity)
           projects:archive | projects:restore | projects:delete <id>
                                Archive a project (refused until restored), or delete an archived one for good
           secrets              The project's secrets, as the console's Secrets page lists them: the ones functions and
