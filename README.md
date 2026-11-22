@@ -489,6 +489,7 @@ Winche emulator is running — rules from database.rules, storage.rules, reloade
   Storage           http://localhost:9090/projects/demo/files/v1
   Auth              http://localhost:9090/projects/demo/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)
   Functions         http://localhost:9090/projects/demo/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)
+  Integrity         monitored: tokens read, never required   (any proof gets a token here; --integrity off|monitor|enforce)
   Postgres          temporary (gone when the emulator stops)
 
   Sign in as anyone with an unsigned token:
@@ -498,6 +499,13 @@ Winche emulator is running — rules from database.rules, storage.rules, reloade
 14:02:12 GET    /documents/v1/users/u1 as u2 → 403  ← denied by the rules
 14:02:30 ↻ database.rules reloaded
 ```
+
+**Integrity** works as on a server, except that any proof gets a token: any app id, any provider (App Attest, Play
+Integrity, the browser check) and any debug token (a simulator's `WincheDebugIntegrity("wdt_local")` is enough). The
+emulator can't check Apple's, Google's or Cloudflare's proofs, so it doesn't. Functions see `ctx.app`, and
+`{ integrity: true }` callables answer only calls with a token. `--integrity enforce` refuses every product's requests
+without one, as an enforcing project does (email links, HTTP functions and signed file links pass). Use it to try what
+your app does when it's refused. `--integrity off` reads no tokens.
 
 - **Postgres** starts in Docker for the session (or pass `--pg <connection string>` to use your own and keep the
   data). **Files** go to a temporary folder (or `--data <dir>`), uploaded and downloaded through the emulator's own

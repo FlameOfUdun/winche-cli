@@ -175,6 +175,7 @@ internal static partial class CliApp
           --port <n>           Loopback port for the sign-in callback (login; default 9005), or the emulators' port (9090)
           --host <name>        Emulators: the address to listen on (default localhost; 0.0.0.0 for devices)
           --pg <connection>    Emulators: use this Postgres instead of a temporary one in Docker
+          --integrity <mode>   Emulators: off, monitor (default) or enforce Integrity; any proof gets a token there
           --data <dir>         Emulators: keep stored files here (default: a temporary folder)
           --quiet              Emulators: don't print each request
           --verbose            Emulators: show the servers' own logs
@@ -755,6 +756,9 @@ internal static partial class CliApp
                 Quiet = args.Flag("quiet") || command is not null,
                 Verbose = args.Flag("verbose"),
                 ProjectId = config?.ProjectId ?? "demo",
+                Integrity = args.Value("integrity") is { } mode
+                    ? mode is "off" or "monitor" or "enforce" ? mode : throw new CliException($"--integrity {mode}: off, monitor or enforce.", 2)
+                    : "monitor",
             };
 
             if (options.Functions is not null) options = options with { DenoPath = await DenoInstaller.EnsureAsync(env, http, ct) };
@@ -1326,7 +1330,7 @@ internal sealed class Args
         "rotate", "path-style", "finish", "cancel", "keep-old", "follow", "remove-secrets", "apple-development", "android-sideloaded"];
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "folder", "title", "role", "issuer", "subject", "audience", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
-        "role", "sdk", "android-package", "apple-bundle-id", "apple-team-id", "web-origin", "token-minutes", "android-cloud-project", "android-device", "android-certificate", "web-site-key", "web-hostname",
+        "role", "sdk", "android-package", "apple-bundle-id", "apple-team-id", "web-origin", "token-minutes", "integrity", "android-cloud-project", "android-device", "android-certificate", "web-site-key", "web-hostname",
         "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel",
         "ref", "access-key-id"];
     /// <summary>Options that may be given more than once (--set KEY=value --set …).</summary>

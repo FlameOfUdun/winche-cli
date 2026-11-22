@@ -23,7 +23,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         return path;
     }
 
-    private Task<EmulatorHost> Start(TextWriter log, string? databaseRules = null, string? storageRules = null) =>
+    private Task<EmulatorHost> Start(TextWriter log, string? databaseRules = null, string? storageRules = null, string integrity = "monitor") =>
         EmulatorHost.StartAsync(new EmulatorOptions
         {
             Port = 0,
@@ -31,6 +31,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
             DataDirectory = Path.Combine(_dir, "data"),
             DatabaseRules = databaseRules,
             StorageRules = storageRules,
+            Integrity = integrity,
         }, log, default);
 
     private static HttpClient As(EmulatorHost host, string? uid, params (string, object?)[] claims)
@@ -56,6 +57,38 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
             await Task.Delay(100);
         }
         Assert.Fail("condition not met within 5 s");
+    }
+
+    [Fact]
+    public async Task Integrity_takes_any_proof_and_when_enforced_refuses_requests_without_a_token()
+    {
+        var rules = File("database.rules", "match notes/{id} {\n  allow read, write: if true;\n}\n");
+        var log = new StringWriter();
+        await using var host = await Start(log, databaseRules: rules, integrity: "enforce");
+        host.PrintBanner(rules, null);
+        Assert.Contains("Integrity         enforced", log.ToString());
+        using var client = As(host, "u1");
+
+        var refused = await Put(client, "notes/a", "x");
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Contains("integrity-required", await refused.Content.ReadAsStringAsync());
+
+        // A challenge, then any proof: a token, logged.
+        var challenge = await client.PostAsJsonAsync("/integrity/v1/challenge", new { app = "clinic-app" });
+        Assert.Equal(HttpStatusCode.OK, challenge.StatusCode);
+        var exchanged = await (await client.PostAsJsonAsync("/integrity/v1/exchange", new { app = "clinic-app", provider = "debug", debugToken = "wdt_anything" })).Content.ReadFromJsonAsync<JsonObject>();
+        var token = exchanged!["token"]!.GetValue<string>();
+        Assert.Contains("Integrity: clinic-app proved itself (debug", log.ToString());
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/integrity/v1/exchange", new { app = "clinic-app" })).StatusCode);
+
+        var request = new HttpRequestMessage(HttpMethod.Put, Doc("notes/a")) { Content = JsonContent.Create(new { fields = new { name = new { stringValue = "x" } } }) };
+        request.Headers.Add("X-Winche-Integrity", token);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(request)).StatusCode);
+        // As on a server: links from emails never need one; a made-up token doesn't pass.
+        Assert.NotEqual(HttpStatusCode.Forbidden, (await client.GetAsync("/auth/v1/action?mode=verifyEmail&code=x")).StatusCode);
+        var forged = new HttpRequestMessage(HttpMethod.Get, Doc("notes/a"));
+        forged.Headers.Add("X-Winche-Integrity", "emu1.made-up");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(forged)).StatusCode);
     }
 
     [Fact]

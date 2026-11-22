@@ -55,6 +55,8 @@ internal sealed record EmulatorOptions
     public Dictionary<string, PluginConfig>? Plugins { get; init; }
     /// <summary>The deno program for functions.</summary>
     public string? DenoPath { get; init; }
+    /// <summary>Integrity for every product: off, monitor (the default) or enforce. Any proof gets a token here.</summary>
+    public string Integrity { get; init; } = "monitor";
     /// <summary>The project id apps see in /.well-known/winche.</summary>
     public string ProjectId { get; init; } = "demo";
 }
@@ -170,9 +172,11 @@ internal sealed class EmulatorHost : IAsyncDisposable
 
         builder.Services.AddWincheHooks(o => o.ConnectionString = connection);   // webhooks and ready-made actions
         // Functions (JS/TS on Deno), with @winche-technologies/winche-admin acting with the server's rights; callables at /functions/v1/call/{name}.
+        var integrity = new EmulatorIntegrity(options.Integrity, output, options.Quiet);
         Winche.Functions.ServiceCollectionExtensions.AddWincheFunctions(builder.Services, o =>
         {
             o.ConnectionString = connection;
+            o.AppProof = integrity.ProofOf;   // ctx.app, and integrity: true callables
             o.DenoPath = options.DenoPath;
             o.SyncInterval = TimeSpan.FromSeconds(1);
         });
@@ -221,6 +225,8 @@ internal sealed class EmulatorHost : IAsyncDisposable
         app.UseWebSockets();
         app.UseWincheWsQueryToken();
         app.UseWincheCaller();
+        if (integrity.Mode != "off") app.Use(integrity.Gate);
+        integrity.Map(app);
         await app.InitializeWincheDatabaseAsync();
         app.MapWincheDatabaseWsApi();
         app.MapWincheDatabaseRestApi();
@@ -252,7 +258,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
         baseUrl = address.Replace("127.0.0.1", "localhost").Replace("[::1]", "localhost").TrimEnd('/');
 
-        var host = new EmulatorHost(app, postgres, tempData, baseUrl, connection, data, output) { ProjectUrl = $"{baseUrl}/projects/{options.ProjectId}" };
+        var host = new EmulatorHost(app, postgres, tempData, baseUrl, connection, data, output) { ProjectUrl = $"{baseUrl}/projects/{options.ProjectId}", IntegrityMode = integrity.Mode };
         host.Watch(options.DatabaseRules, WincheDatabaseKeys.RuleEngine);
         host.Watch(options.StorageRules, WincheStorageKeys.RULE_ENGINE_KEY);
         host.Watch(options.AssetsRules, AssetsServiceCollectionExtensions.RulesKey);
@@ -263,6 +269,9 @@ internal sealed class EmulatorHost : IAsyncDisposable
 
     /// <summary>The project's address, as on Winche Server (<c>…/projects/&lt;id&gt;</c>): what apps use as their base URL.</summary>
     public string ProjectUrl { get; private init; } = "";
+
+    /// <summary>How Integrity treats requests here (--integrity).</summary>
+    public string IntegrityMode { get; private init; } = "monitor";
 
     public void PrintBanner(string? databaseRules, string? storageRules, string? assetsRules = null)
     {
@@ -277,6 +286,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         _out.WriteLine($"  Auth              {ProjectUrl}/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)");
         _out.WriteLine($"  Functions         {ProjectUrl}/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)");
         _out.WriteLine($"  Assets            {ProjectUrl}/assets/v1/channels/<channel>   (the assets folder, on save; winche assets init makes one)");
+        _out.WriteLine($"  Integrity         {IntegrityMode switch { "enforce" => "enforced: requests without a token are refused", "off" => "off", _ => "monitored: tokens read, never required" }}   (any proof gets a token here; --integrity off|monitor|enforce)");
         _out.WriteLine($"  Postgres          {(TemporaryDatabase ? "temporary (gone when the emulator stops)" : "the one you passed with --pg")}");
         _out.WriteLine();
         _out.WriteLine("  Sign in as anyone with an unsigned token:");
