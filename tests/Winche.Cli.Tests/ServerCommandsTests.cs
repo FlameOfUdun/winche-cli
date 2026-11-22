@@ -291,7 +291,7 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         Assert.Contains("clinic-ios", list.Out);
         Assert.Contains("ABCDE12345.com.example.clinic", list.Out);
         Assert.Contains("0 verified today (development builds accepted)", list.Out);
-        Assert.Contains("isn't an SDK", (await Run(null, "apps:create", "X", "--sdk", "swift")).Err);
+        Assert.Contains("--sdk is no longer needed", (await Run(null, "apps:create", "X", "--sdk", "flutter")).Err);
         Assert.Contains("There's already an app clinic-ios", (await Run(null, "apps:create", "Again", "--id", "clinic-ios")).Err);
         Assert.Contains("--web-origin is gone", (await Run(null, "apps:create", "Web", "--web-origin", "https://a.example")).Err);
     }

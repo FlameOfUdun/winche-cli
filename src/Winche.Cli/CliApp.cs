@@ -38,7 +38,7 @@ internal static partial class CliApp
           projects:create <id> Make a project (server admins; --name, and --db-name/--db-host/--db-port/--db-user/
                                --db-ssl with WINCHE_DB_PASSWORD for a database elsewhere)
           apps                 The project's apps (Integrity), with today's verified requests
-          apps:create <name>   Add an app (--id, --sdk flutter, --android-package, --apple-bundle-id,
+          apps:create <name>   Add an app (--id, --android-package, --apple-bundle-id,
                                --apple-team-id, --apple-development to accept App Attest from development
                                builds, --android-cloud-project <number>, --android-device basic|device|strong,
                                --android-sideloaded, --android-certificate <sha256,…>, --web-site-key <Turnstile site key>,

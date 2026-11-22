@@ -237,7 +237,7 @@ internal static partial class CliApp
                 var devices = a["devices"]?["count"]?.GetValue<long>() is { } n ? $", {n} App Attest device{(n == 1 ? "" : "s")}" : "";
                 var dev = a["appleDevelopment"]?.GetValue<bool>() == true ? " (development builds accepted)" : "";
                 if (a["webSiteKey"]?.ToString() is { Length: > 0 }) dev += a["turnstileSecret"] is JsonObject ? ", browser check" : ", browser check without its secret key";
-                env.Out.WriteLine($"  {a["id"],-24} {a["name"],-20} {a["sdk"],-8} {string.Join(", ", where),-44} {today} verified today{devices}{dev}");
+                env.Out.WriteLine($"  {a["id"],-24} {a["name"],-20} {string.Join(", ", where),-44} {today} verified today{devices}{dev}");
             }
             return 0;
         }
@@ -247,9 +247,10 @@ internal static partial class CliApp
         {
             name = Ask("App name", name, option: "the name: winche apps:create <name>");
             if (args.Value("web-origin") is not null) throw new CliException("--web-origin is gone: any web page may call the project; Integrity decides which apps get in.", 2);
+            if (args.Value("sdk") is not null) throw new CliException("--sdk is no longer needed: an app is its platforms' ids (--android-package, --apple-bundle-id, --web-site-key), whatever it's built with.", 2);
             var request = new
             {
-                name, id = args.Value("id"), sdk = args.Value("sdk") ?? "flutter",
+                name, id = args.Value("id"),
                 androidPackage = args.Value("android-package"), appleBundleId = args.Value("apple-bundle-id"), appleTeamId = args.Value("apple-team-id"),
                 appleDevelopment = args.Flag("apple-development"),
                 androidCloudProjectNumber = args.Value("android-cloud-project") is { } cp ? long.TryParse(cp, out var n) ? n : throw new CliException($"--android-cloud-project {cp}: the Google Cloud project's number.", 2) : (long?)null,

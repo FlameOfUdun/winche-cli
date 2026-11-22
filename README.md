@@ -114,7 +114,7 @@ winche settings pull                                   # settings/database.json,
   `--apple-team-id`, `--apple-development` to accept App Attest keys from development builds; for Play Integrity
   `--android-cloud-project <number>`, `--android-device basic|device|strong` (default device), `--android-sideloaded`
   to accept builds from outside Google Play, `--android-certificate <sha256,…>`; for the browser check
-  `--web-site-key <Turnstile site key>`, `--web-hostname <host,…>`; Flutter is the only SDK so far), and prints the `winche configure --app <id>` to run in its
+  `--web-site-key <Turnstile site key>`, `--web-hostname <host,…>`; an app is its platforms' ids, whatever it's built with), and prints the `winche configure --app <id>` to run in its
   folder. `winche apps` lists them with today's verified requests.
 - **Integrity:** apps prove they're the project's own and send an Integrity token with every request. `winche integrity`
   shows each product's mode (`off`, `monitor`: counted, never refused, the default; `enforce`: refused without a
