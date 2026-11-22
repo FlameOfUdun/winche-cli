@@ -208,8 +208,15 @@ internal static partial class CliApp
         /// <c>winche secrets:set &lt;name&gt;</c>: a product's own secret (smtp-password, keycloak-sync), else one functions
         /// and plugins read, by its NAME.
         /// </summary>
-        public Task<int> SecretSetAsync(string name, CancellationToken ct) =>
-            name is "smtp-password" or "keycloak-sync" ? SecretsAsync(name, ct) : FunctionSecretSetAsync(name, ct);
+        public Task<int> SecretSetAsync(string name, CancellationToken ct)
+        {
+            if (name is "smtp-password" or "keycloak-sync")
+            {
+                if (args.Value("in") is not null) throw new CliException($"--in keeps functions' secrets in AWS; set {name} in the console to keep it there.", 2);
+                return SecretsAsync(name, ct);
+            }
+            return FunctionSecretSetAsync(name, ct);
+        }
 
         /// <summary>
         /// <c>winche secrets:set NAME</c> (or the old <c>functions secrets:set</c>): adds or replaces it. The value comes from <c>--from-file</c> (e.g. a
@@ -218,6 +225,8 @@ internal static partial class CliApp
         public async Task<int> FunctionSecretSetAsync(string name, CancellationToken ct)
         {
             CheckSecretName(name);
+            if (args.Value("in") is not null && args.Value("ref") is not null)
+                throw new CliException("Use --in (the value kept in AWS by Winche) or --ref (one you keep in AWS yourself), not both.", 2);
             if (Reference() is { } reference)
             {
                 var c = await ClientAsync(ct);
@@ -357,6 +366,9 @@ internal static partial class CliApp
                         env.Out.WriteLine($"  {s!["name"] + ":",-10} {s["title"]}: {s["hint"]}");
                         if (s["access"] is { } a)
                             env.Out.WriteLine($"  {"",-10} {(a["problem"]?.GetValue<string>() is { } why ? $"can't be asked: {why}"
+                                : a["read"]?.GetValue<bool>() != true && a["write"]?.GetValue<bool>() != true && info["appCredentials"]?.GetValue<bool>() != true
+                                    && keys.All(k => k?["isSet"]?.GetValue<bool>() != true)
+                                    ? "needs the project's own key first: winche secrets:key aws"
                                 : $"the key may {string.Join(", ", new[] { ("read", "read"), ("write", "write"), ("delete", "delete") }.Where(r => a[r.Item1]?.GetValue<bool>() == true).Select(r => r.Item2).DefaultIfEmpty("do nothing"))}"
                                   + (a["missing"]?.AsArray() is { Count: > 0 } m ? $" (missing {string.Join(", ", m.Select(x => x!.GetValue<string>()))})" : ""))}");
                     }

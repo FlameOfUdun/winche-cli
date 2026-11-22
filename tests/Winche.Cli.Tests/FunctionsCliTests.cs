@@ -235,6 +235,12 @@ public class FunctionsCliTests(PostgresFixture fx) : IDisposable
         (exit, _, err) = await Run(console, v => v == "WINCHE_SECRET" ? "k" : Ci(v), "secrets:set", "MAIL_KEY", "--in", "vault");
         Assert.Equal(2, exit);
         Assert.Contains("aws-sm (Secrets Manager) or aws-ssm", err);
+        (exit, _, err) = await Run(console, Ci, "secrets:set", "MAIL_KEY", "--in", "aws-sm", "--ref", "aws-ssm:/x");
+        Assert.Equal(2, exit);
+        Assert.Contains("not both", err);
+        (exit, _, err) = await Run(console, v => v == "WINCHE_SECRET" ? "p" : Ci(v), "secrets:set", "smtp-password", "--in", "aws-sm");
+        Assert.Equal(2, exit);
+        Assert.Contains("in the console", err);
         (exit, output, err) = await Run(console, Ci, "secrets:move", "MAIL_KEY", "--to", "aws-ssm");
         Assert.True(exit == 0, err);
         var move = console.Requests.Last();
