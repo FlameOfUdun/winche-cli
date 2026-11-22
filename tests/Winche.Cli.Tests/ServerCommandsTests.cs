@@ -354,6 +354,24 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_browser_check_is_set_up_from_the_terminal()
+    {
+        await SetupAsync();
+        var made = await Run(null, "apps:create", "Clinic web", "--id", "clinic-web", "--web-site-key", "0x4AAAAAAAsitekey123", "--web-hostname", "app.example.com, admin.example.com");
+        Assert.True(made.Exit == 0, made.Err);
+        Assert.Contains("browser check without its secret key", (await Run(null, "apps")).Out);
+        Assert.Contains("isn't a Turnstile site key", (await Run(null, "apps:create", "Bad", "--web-site-key", "nope")).Err);
+        _vars["WINCHE_TURNSTILE_SECRET"] = "0x4AAAAAAAsecretsecret";
+        var set = await Run(null, "integrity:turnstile-secret", "clinic-web");
+        Assert.True(set.Exit == 0, set.Err);
+        Assert.DoesNotContain("0x4AAAAAAAsecretsecret", set.Out);
+        Assert.Contains("clinic-web", (await Run(null, "apps")).Out);
+        Assert.Contains(", browser check", (await Run(null, "apps")).Out);
+        Assert.DoesNotContain("without its secret key", (await Run(null, "apps")).Out);
+        Assert.Contains("No app nope", (await Run(null, "integrity:turnstile-secret", "nope")).Err);
+    }
+
+    [Fact]
     public async Task Members_are_invited_or_given_a_role_in_the_first_project()
     {
         await SetupAsync();

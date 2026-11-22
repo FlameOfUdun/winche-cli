@@ -236,6 +236,7 @@ internal static partial class CliApp
                 var today = a["usage"]?.AsObject().Sum(u => u.Value?["today"]?.GetValue<long>() ?? 0) ?? 0;
                 var devices = a["devices"]?["count"]?.GetValue<long>() is { } n ? $", {n} App Attest device{(n == 1 ? "" : "s")}" : "";
                 var dev = a["appleDevelopment"]?.GetValue<bool>() == true ? " (development builds accepted)" : "";
+                if (a["webSiteKey"]?.ToString() is { Length: > 0 }) dev += a["turnstileSecret"] is JsonObject ? ", browser check" : ", browser check without its secret key";
                 env.Out.WriteLine($"  {a["id"],-24} {a["name"],-20} {a["sdk"],-8} {string.Join(", ", where),-44} {today} verified today{devices}{dev}");
             }
             return 0;
@@ -255,6 +256,8 @@ internal static partial class CliApp
                 androidSideloaded = args.Flag("android-sideloaded"),
                 androidDeviceIntegrity = args.Value("android-device"),
                 androidCertificates = (args.Value("android-certificate") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                webSiteKey = args.Value("web-site-key"),
+                webHostnames = (args.Value("web-hostname") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             };
             var client = await ClientAsync(ct);
             var (status, body) = await client.SendAsync(HttpMethod.Post, "integrity/apps", request, ct);
@@ -338,6 +341,22 @@ internal static partial class CliApp
             if (status != HttpStatusCode.OK) throw new CliException($"Not set: {ConsoleClient.ErrorText(body, status)}");
             env.Out.WriteLine($"Play Integrity signs in as {body["email"]?.ToString() ?? "the service account"}{(reference is null ? "" : $" (read from {reference})")}.");
             if (file is not null) env.Out.WriteLine($"The project keeps it now: you can delete {file}.");
+            return 0;
+        }
+
+        /// <summary>
+        /// <c>winche integrity:turnstile-secret &lt;app&gt;</c>: the app's Turnstile secret key (the browser check), typed
+        /// unseen (or <c>WINCHE_TURNSTILE_SECRET</c>), or <c>--ref aws-sm:…</c>.
+        /// </summary>
+        public async Task<int> TurnstileSecretAsync(string? app, CancellationToken ct)
+        {
+            app = Ask("App id", app, option: "the app: winche integrity:turnstile-secret <app> (see winche apps)");
+            var reference = args.Value("ref");
+            var value = reference is null ? AskSecret("Turnstile secret key", "WINCHE_TURNSTILE_SECRET", confirm: false) : null;
+            var (status, body) = await (await ClientAsync(ct)).SendAsync(HttpMethod.Put, $"integrity/apps/{Uri.EscapeDataString(app)}/turnstile-secret", new { value, reference }, ct);
+            if (status == HttpStatusCode.NotFound) throw new CliException($"No app {app}. See: winche apps");
+            if (status != HttpStatusCode.NoContent) throw new CliException($"Not set: {ConsoleClient.ErrorText(body, status)}");
+            env.Out.WriteLine($"The browser check for {app} uses that secret key{(reference is null ? "" : $" (read from {reference})")}.");
             return 0;
         }
 

@@ -41,7 +41,8 @@ internal static partial class CliApp
           apps:create <name>   Add an app (--id, --sdk flutter, --android-package, --apple-bundle-id,
                                --apple-team-id, --apple-development to accept App Attest from development
                                builds, --android-cloud-project <number>, --android-device basic|device|strong,
-                               --android-sideloaded, --android-certificate <sha256,…>); then winche configure --app <id>
+                               --android-sideloaded, --android-certificate <sha256,…>, --web-site-key <Turnstile site key>,
+                               --web-hostname <host,…>); then winche configure --app <id>
           integrity            Each product's Integrity mode and today's requests, token lifetime, debug tokens
           integrity:set <product> off|monitor|enforce
                                How a product treats requests without a valid Integrity token (-m why;
@@ -50,6 +51,8 @@ internal static partial class CliApp
                                A debug token for simulators, desktop builds or CI (printed once)
           integrity:play-account <key.json>
                                The Google service account Play Integrity signs in as (or --ref aws-sm:…)
+          integrity:turnstile-secret <app>
+                               The app's Turnstile secret key, for the browser check (typed unseen, or --ref aws-sm:…)
           integrity:debug-tokens:delete <id>
                                Remove one: the Integrity tokens it got stop working
           members              Who can use the project, and as what
@@ -234,6 +237,7 @@ internal static partial class CliApp
                 "integrity:debug-tokens:create" => await run.DebugTokenCreateAsync(a.Positional.ElementAtOrDefault(1), a.Positional.ElementAtOrDefault(2), ct),
                 "integrity:debug-tokens:delete" => await run.DebugTokenDeleteAsync(Arg(1), ct),
                 "integrity:play-account" => await run.PlayAccountAsync(a.Positional.ElementAtOrDefault(1), ct),
+                "integrity:turnstile-secret" => await run.TurnstileSecretAsync(a.Positional.ElementAtOrDefault(1), ct),
                 "members" => await run.MembersListAsync(ct),
                 "members:add" => await run.MembersAddAsync(a.Positional.ElementAtOrDefault(1), ct),
                 "members:remove" => await run.MembersRemoveAsync(Arg(1), ct),
@@ -1322,7 +1326,7 @@ internal sealed class Args
         "rotate", "path-style", "finish", "cancel", "keep-old", "follow", "remove-secrets", "apple-development", "android-sideloaded"];
     private static readonly HashSet<string> Valued = ["console", "token", "config", "only", "message", "folder", "title", "role", "issuer", "subject", "audience", "port", "project", "add", "remove", "host", "pg", "data", "url", "key", "out", "platforms", "app",
         "id", "code", "email", "first-name", "last-name", "name", "products", "scopes", "days", "db-name", "db-host", "db-port", "db-user", "db-ssl",
-        "role", "sdk", "android-package", "apple-bundle-id", "apple-team-id", "web-origin", "token-minutes", "android-cloud-project", "android-device", "android-certificate",
+        "role", "sdk", "android-package", "apple-bundle-id", "apple-team-id", "web-origin", "token-minutes", "android-cloud-project", "android-device", "android-certificate", "web-site-key", "web-hostname",
         "provider", "bucket", "region", "service-url", "access-key", "to", "product", "level", "since", "search", "limit", "from-file", "channel",
         "ref", "access-key-id"];
     /// <summary>Options that may be given more than once (--set KEY=value --set …).</summary>
