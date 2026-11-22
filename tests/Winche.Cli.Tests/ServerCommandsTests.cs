@@ -333,6 +333,10 @@ public sealed class ServerCommandsTests(PostgresFixture fx) : IAsyncLifetime
         await SetupAsync();
         var made = await Run(null, "apps:create", "Clinic Android", "--id", "clinic-android", "--android-package", "com.example.clinic",
             "--android-cloud-project", "123456789012", "--android-device", "strong", "--android-sideloaded");
+        // Builds from outside Google Play need the app's signing certificate: a copy re-signed by anyone would pass.
+        Assert.Contains("signing certificate", made.Err);
+        made = await Run(null, "apps:create", "Clinic Android", "--id", "clinic-android", "--android-package", "com.example.clinic",
+            "--android-cloud-project", "123456789012", "--android-device", "strong", "--android-sideloaded", "--android-certificate", new string('a', 43));
         Assert.True(made.Exit == 0, made.Err);
         Assert.Contains("--android-cloud-project nope", (await Run(null, "apps:create", "X", "--android-cloud-project", "nope")).Err);
         Assert.Contains("basic, device or strong", (await Run(null, "apps:create", "Y", "--android-package", "com.example.y", "--android-device", "great")).Err);

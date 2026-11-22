@@ -89,7 +89,20 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         var forged = new HttpRequestMessage(HttpMethod.Get, Doc("notes/a"));
         forged.Headers.Add("X-Winche-Integrity", "emu1.made-up");
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(forged)).StatusCode);
+        // Writes and queries (the database's colon verbs) are enforced like the rest of it.
+        var commit = await client.PostAsJsonAsync("/documents/v1:commit", new { writes = Array.Empty<object>() });
+        Assert.Equal(HttpStatusCode.Forbidden, commit.StatusCode);
+        Assert.Contains("integrity-required", await commit.Content.ReadAsStringAsync());
     }
+
+    [Theory]
+    [InlineData("/auth/v1/photos/abc", "GET", true)]
+    [InlineData("/auth/v1/photos/abc", "POST", false)]
+    [InlineData("/files/v1/signed/x", "GET", true)]
+    [InlineData("/auth/v1/providers/staff/changed", "POST", true)]
+    [InlineData("/auth/v1/providers/staff/x/changed", "POST", false)]
+    public void The_emulator_exempts_what_a_server_does(string path, string method, bool exempt) =>
+        Assert.Equal(exempt, Winche.Cli.Emulator.EmulatorIntegrity.Exempt(new Microsoft.AspNetCore.Http.PathString(path), method));
 
     [Fact]
     public async Task Rules_from_the_file_guard_requests_and_reload_on_save()

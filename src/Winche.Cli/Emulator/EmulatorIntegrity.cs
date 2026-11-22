@@ -30,21 +30,32 @@ internal sealed class EmulatorIntegrity(string mode, TextWriter output, bool qui
         return token is not null && _tokens.TryGetValue(token, out var t) && t.Expires > _time.GetUtcNow() ? new FunctionAppProof(t.App, t.Provider) : null;
     }
 
-    /// <summary>What never needs a token (as on a server): email action links, the key set, providers' notices, HTTP functions.</summary>
-    private static bool Exempt(PathString path)
+    /// <summary>
+    /// What never needs a token (as on a server): email action links, HTTP functions, signed file links, and for reading,
+    /// users' photos and the key set; providers' notices at exactly their addresses.
+    /// </summary>
+    internal static bool Exempt(PathString path, string method)
     {
-        if (path.StartsWithSegments("/auth/v1/action") || path.StartsWithSegments("/auth/v1/.well-known") || path.StartsWithSegments("/functions/v1/http")
-            || path.StartsWithSegments("/files/v1/signed") || path.StartsWithSegments("/auth/v1/photos")) return true;
+        if (path.StartsWithSegments("/auth/v1/action") || path.StartsWithSegments("/functions/v1/http") || path.StartsWithSegments("/files/v1/signed")) return true;
+        if ((HttpMethods.IsGet(method) || HttpMethods.IsHead(method)) && (path.StartsWithSegments("/auth/v1/.well-known") || path.StartsWithSegments("/auth/v1/photos"))) return true;
+        var parts = (path.Value ?? "").Split('/', StringSplitOptions.RemoveEmptyEntries);
+        static bool Is(string a, string b) => a.Equals(b, StringComparison.OrdinalIgnoreCase);
+        return parts.Length == 5 && Is(parts[0], "auth") && Is(parts[1], "v1") && Is(parts[2], "providers")
+            && (Is(parts[4], "backchannel-logout") || Is(parts[4], "changed"));
+    }
+
+    /// <summary>Whether <paramref name="path"/> is a product's: its path, under it, or its colon verbs (/documents/v1:commit).</summary>
+    internal static bool UnderProduct(PathString path, string product)
+    {
         var p = path.Value ?? "";
-        return p.StartsWith("/auth/v1/providers/", StringComparison.OrdinalIgnoreCase)
-            && (p.EndsWith("/backchannel-logout", StringComparison.OrdinalIgnoreCase) || p.EndsWith("/changed", StringComparison.OrdinalIgnoreCase));
+        return p.StartsWith(product, StringComparison.OrdinalIgnoreCase) && (p.Length == product.Length || p[product.Length] is '/' or ':');
     }
 
     /// <summary>Refuses product requests without an emulator token, when enforcing.</summary>
     public RequestDelegate Gate(RequestDelegate next) => async http =>
     {
-        if (Mode == "enforce" && !HttpMethods.IsOptions(http.Request.Method) && !Exempt(http.Request.Path)
-            && Products.Any(p => http.Request.Path.StartsWithSegments(p)) && ProofOf(http) is null)
+        if (Mode == "enforce" && !HttpMethods.IsOptions(http.Request.Method) && !Exempt(http.Request.Path, http.Request.Method)
+            && Products.Any(p => UnderProduct(http.Request.Path, p)) && ProofOf(http) is null)
         {
             http.Response.StatusCode = StatusCodes.Status403Forbidden;
             await http.Response.WriteAsJsonAsync(new

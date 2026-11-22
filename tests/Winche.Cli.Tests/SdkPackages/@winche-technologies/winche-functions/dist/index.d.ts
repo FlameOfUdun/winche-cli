@@ -29,7 +29,7 @@ export interface Caller {
 }
 /**
  * A secret the deployment uses (an API key, a password), set in the console (the Secrets page) or with
- * `winche functions secrets:set NAME`. Declared once (`secrets.define("NAME")`) and given to the functions that read it
+ * `winche secrets:set NAME`. Declared once (`secrets.define("NAME")`) and given to the functions that read it
  * (`{ secrets: [handle] }` in their options). Values are hidden in the functions' logs.
  */
 export interface Secret {
@@ -84,8 +84,20 @@ export interface Context {
      * project's own code may use checks it.
      */
     byServer: boolean;
+    /**
+     * For callables: the app that proved it's the project's own (Integrity: App Attest, Play Integrity, the browser
+     * check, a debug token), or null (no valid Integrity token, or the server's own call). Absent before Winche Server 4.
+     */
+    app: AppProof | null;
     /** Writes to the server's logs (Logs → functions); console.log does too. */
     log(...args: unknown[]): void;
+}
+/** An app's proof that it's the project's own: its id in the project, and how it proved itself. */
+export interface AppProof {
+    /** The app's id (Integrity in the console). */
+    id: string;
+    /** How: "appAttest", "playIntegrity", "turnstile" or "debug". */
+    provider: "appAttest" | "playIntegrity" | "turnstile" | "debug" | (string & {});
 }
 /** @internal What the runtime hands a run. */
 interface RawContext {
@@ -94,6 +106,8 @@ interface RawContext {
     auth: Caller | null;
     /** The server's own call (absent before 3.1: false). */
     server?: boolean;
+    /** The app's Integrity proof (absent before 3.2: null). */
+    app?: AppProof | null;
     log(...args: unknown[]): void;
 }
 /** @internal The context a handler gets. */
@@ -260,6 +274,15 @@ export interface FunctionOptions {
      */
     isolate?: boolean;
 }
+/** A callable's options: a function's, and whether only the project's own apps may call it. */
+export interface CallableOptions extends FunctionOptions {
+    /**
+     * Only apps that prove they're the project's own (a valid Integrity token) may call it: others get
+     * permission-denied (reason integrity-required), whatever the project enforces. The project's own code (other
+     * functions, the console, the admin SDK) calls it as ever. Needs Winche Server 4: older servers refuse to deploy it (it's marked protocol 2).
+     */
+    integrity?: boolean;
+}
 /** A JSON Schema, e.g. { type: "object", properties: { lang: { enum: ["en", "de"] } }, required: ["lang"] }. */
 export type JsonSchema = {
     [keyword: string]: Json;
@@ -333,7 +356,8 @@ export type Trigger = {
 };
 /** What an exported function is: Winche reads these when the code is deployed. */
 export interface WincheFunction<A = unknown, R = unknown> {
-    __winche: 1;
+    /** The protocol: 1, or 2 for a callable only the project's apps may call, so servers from before Integrity refuse it. */
+    __winche: 1 | 2;
     trigger: Trigger;
     options: FunctionOptions;
     /** @internal Called by the runtime with what the server sent and the run's raw context. */
@@ -385,7 +409,7 @@ export declare const schedule: (cron: string, handler: Handler<ScheduleEvent>, o
     timeZone?: string;
 }) => WincheFunction<ScheduleEvent, unknown>;
 /** Called by apps (the SDKs' functions.call("name", data)); returns JSON to the caller. */
-export declare const callable: <D = Json, R = Json>(handler: (data: D, ctx: Context) => R | Promise<R>, options?: FunctionOptions) => WincheFunction<D, R>;
+export declare const callable: <D = Json, R = Json>(handler: (data: D, ctx: Context) => R | Promise<R>, options?: CallableOptions) => WincheFunction<D, R>;
 /**
  * A page in the console made of your own files: `pages({ title: "Reports", files: "console/reports" })` shows
  * console/reports/index.html in a sandboxed frame. In it, @winche-technologies/winche-admin acts as the person who opened it.

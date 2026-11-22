@@ -505,7 +505,7 @@ Integrity, the browser check) and any debug token (a simulator's `WincheDebugInt
 emulator can't check Apple's, Google's or Cloudflare's proofs, so it doesn't. Functions see `ctx.app`, and
 `{ integrity: true }` callables answer only calls with a token. `--integrity enforce` refuses every product's requests
 without one, as an enforcing project does (email links, HTTP functions and signed file links pass). Use it to try what
-your app does when it's refused. `--integrity off` reads no tokens.
+your app does when it's refused. `--integrity off` checks and refuses nothing (tokens are still read, for `ctx.app` and callables with `{ integrity: true }`, as on a server).
 
 - **Postgres** starts in Docker for the session (or pass `--pg <connection string>` to use your own and keep the
   data). **Files** go to a temporary folder (or `--data <dir>`), uploaded and downloaded through the emulator's own

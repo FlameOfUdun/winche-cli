@@ -9,7 +9,7 @@
  * don't run tests in parallel that give different ones).
  */
 import { type AdminOptions, type Call } from "@winche-technologies/winche-admin";
-import type { Caller, Context } from "./index.js";
+import type { AppProof, Caller, Context } from "./index.js";
 /** Runs `fn` with these secrets' values (a secret not given reads as not set). */
 export declare function withSecrets<R>(values: {
     [name: string]: string | null;
@@ -31,4 +31,5 @@ export declare function testContext(options?: {
     name?: string;
     caller?: Caller | null;
     byServer?: boolean;
+    app?: AppProof | null;
 }): Context;

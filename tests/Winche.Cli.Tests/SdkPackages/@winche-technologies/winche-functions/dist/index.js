@@ -68,7 +68,7 @@ export const resources = {
 };
 /** @internal The context a handler gets. */
 export function contextOf(raw) {
-    return { name: raw.functionName, caller: raw.auth ?? null, byServer: raw.server === true, log: raw.log };
+    return { name: raw.functionName, caller: raw.auth ?? null, byServer: raw.server === true, app: raw.app ?? null, log: raw.log };
 }
 /** A document as a change event carries it (plain fields beside typed ones). @internal */
 function changedDocument(call, path, d) {
@@ -149,7 +149,7 @@ function optionsOut(options) {
     return { ...options, secrets: names };
 }
 const define = (trigger, run, options = {}) => ({
-    __winche: 1, trigger, options: optionsOut(options), run,
+    __winche: options?.integrity === true ? 2 : 1, trigger, options: optionsOut(options), run,
     handler: async (arg, raw) => {
         const r = raw;
         return changesOut(trigger, await run(eventOf(trigger, arg, r.call), contextOf(r)));
