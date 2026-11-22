@@ -34,7 +34,7 @@ internal sealed class EmulatorIntegrity(string mode, TextWriter output, bool qui
     private static bool Exempt(PathString path)
     {
         if (path.StartsWithSegments("/auth/v1/action") || path.StartsWithSegments("/auth/v1/.well-known") || path.StartsWithSegments("/functions/v1/http")
-            || path.StartsWithSegments("/files/v1/signed")) return true;
+            || path.StartsWithSegments("/files/v1/signed") || path.StartsWithSegments("/auth/v1/photos")) return true;
         var p = path.Value ?? "";
         return p.StartsWith("/auth/v1/providers/", StringComparison.OrdinalIgnoreCase)
             && (p.EndsWith("/backchannel-logout", StringComparison.OrdinalIgnoreCase) || p.EndsWith("/changed", StringComparison.OrdinalIgnoreCase));

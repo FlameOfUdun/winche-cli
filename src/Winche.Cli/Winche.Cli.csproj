@@ -31,7 +31,7 @@
     <PackageReference Include="Winche.Functions.Auth" Version="3.2.0" />
     <PackageReference Include="Winche.Assets.AspNetCore" Version="1.1.0" />
     <PackageReference Include="Winche.Functions.Assets" Version="3.2.0" />
-    <PackageReference Include="Winche.Auth.AspNetCore" Version="2.0.0" />
+    <PackageReference Include="Winche.Auth.AspNetCore" Version="2.1.0" />
     <PackageReference Include="Winche.Core" Version="2.0.0" />
     <PackageReference Include="Winche.Core.AspNetCore" Version="2.0.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.12.0" />
