@@ -212,6 +212,26 @@ export interface BeforeSignInEvent {
     ipAddress: string | null;
 }
 /** A release published (released) or a channel pointed at a release (channelMoved). */
+/** A Realtime list closed (by hand, by a function, or idle): what it holds. */
+export interface RealtimeClosedEvent {
+    type: "closed";
+    /** The list's path, e.g. sessions/s1. */
+    path: string;
+    /** The path pattern's captures ({session} → params.session). */
+    params: {
+        [name: string]: string;
+    };
+    /** The list as it closed. */
+    list: {
+        path: string;
+        count: number;
+        bytes: number;
+        openedAt: Date;
+        closedAt: Date | null;
+    };
+    id: string;
+    at: Date;
+}
 export interface AssetEvent {
     type: "released" | "channelMoved";
     /** The release published, or the one the channel points at now. */
@@ -342,6 +362,10 @@ export type Trigger = {
     events: string[];
     channel?: string;
 } | {
+    kind: "realtime";
+    events: string[];
+    path?: string;
+} | {
     kind: "callable";
 } | {
     kind: "consolePage";
@@ -403,6 +427,13 @@ export declare const onAssets: {
     channelMoved: (handler: Handler<AssetEvent>, options?: FunctionOptions & {
         channel?: string;
     }) => WincheFunction<AssetEvent, unknown>;
+};
+/**
+ * Realtime triggers: a list closed (by hand, by a function, or idle: build the session's outcome from it). With a path
+ * pattern (`sessions/{session}`), only those lists'. Needs Winche Server 4.1.
+ */
+export declare const onRealtime: {
+    closed: (pathOrHandler: string | Handler<RealtimeClosedEvent>, handler?: Handler<RealtimeClosedEvent> | FunctionOptions, options?: FunctionOptions) => WincheFunction<RealtimeClosedEvent, unknown>;
 };
 /** Runs on a schedule: a cron expression ("minute hour day month weekday"), in UTC unless timeZone is given. */
 export declare const schedule: (cron: string, handler: Handler<ScheduleEvent>, options?: FunctionOptions & {

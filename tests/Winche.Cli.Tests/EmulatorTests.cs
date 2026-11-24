@@ -23,7 +23,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         return path;
     }
 
-    private Task<EmulatorHost> Start(TextWriter log, string? databaseRules = null, string? storageRules = null, string integrity = "monitor") =>
+    private Task<EmulatorHost> Start(TextWriter log, string? databaseRules = null, string? storageRules = null, string integrity = "monitor", string? realtimeRules = null) =>
         EmulatorHost.StartAsync(new EmulatorOptions
         {
             Port = 0,
@@ -31,6 +31,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
             DataDirectory = Path.Combine(_dir, "data"),
             DatabaseRules = databaseRules,
             StorageRules = storageRules,
+            RealtimeRules = realtimeRules,
             Integrity = integrity,
         }, log, default);
 
@@ -284,5 +285,31 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         Assert.Equal(3L, (long)claims["level"]!);
         Assert.Equal("k", TestTokens.Decode("x." + Convert.ToBase64String("{\"sub\":\"k\"}"u8.ToArray()).TrimEnd('=') + ".")!["uid"]);
         Assert.Null(TestTokens.Decode("garbage"));
+    }
+
+    [Fact]
+    public async Task Realtime_lists_work_on_the_emulator_with_their_rules_file()
+    {
+        var rules = File("realtime.rules", "match sessions/{s} { allow get: if request.auth != null; allow create: if request.resource.device == request.auth.uid; }\n");
+        await using var host = await Start(TextWriter.Null, realtimeRules: rules);
+        using var socket = new System.Net.WebSockets.ClientWebSocket();
+        var url = host.BaseUrl.Replace("http", "ws").TrimEnd('/') + "/realtime/v1/ws?access_token=" + Uri.EscapeDataString(TestTokens.Mint("ann", new Dictionary<string, object?>()));
+        await socket.ConnectAsync(new Uri(url), default);
+        async Task<System.Text.Json.Nodes.JsonObject> Next()
+        {
+            var buffer = new byte[1 << 16];
+            var r = await socket.ReceiveAsync(buffer, new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token);
+            return System.Text.Json.Nodes.JsonNode.Parse(buffer.AsSpan(0, r.Count))!.AsObject();
+        }
+        Assert.Equal("welcome", (string?)(await Next())["type"]);
+        async Task<System.Text.Json.Nodes.JsonObject> Send(string key)
+        {
+            var frame = $"{{\"type\":\"append\",\"id\":\"{key}\",\"path\":\"sessions/s1\",\"items\":[{{\"key\":\"{key}\",\"payload\":\"AQ==\"}}]}}";
+            await socket.SendAsync(Encoding.UTF8.GetBytes(frame), System.Net.WebSockets.WebSocketMessageType.Text, true, default);
+            return await Next();
+        }
+        Assert.Equal(1L, (long)(await Send("ann:1"))["result"]!["positions"]![0]!);
+        Assert.Equal("permission-denied", (string?)(await Send("bob:1"))["error"]!["code"]);   // the rules file decides
+        Assert.Contains("/realtime/v1/ws", await new HttpClient().GetStringAsync(host.BaseUrl.TrimEnd('/') + "/.well-known/winche"));
     }
 }

@@ -95,6 +95,11 @@ function eventOf(trigger, a, call) {
             return { scheduledAt: new Date(a.scheduledAt), id: a.id };
         case "assets":
             return { type: a.type, release: a.release, channel: a.channel ?? null, note: a.note ?? null, by: a.by ?? null, id: a.id, at: new Date(a.at) };
+        case "realtime":
+            return {
+                type: a.type, path: a.path, params: a.params ?? {}, id: a.id, at: new Date(a.at),
+                list: { ...a.list, openedAt: new Date(a.list?.openedAt), closedAt: a.list?.closedAt ? new Date(a.list.closedAt) : null },
+            };
         case "before":
             if (trigger.on === "documents")
                 return { operation: a.operation, path: a.path, params: a.params ?? {}, caller: a.auth ?? null,
@@ -196,6 +201,15 @@ export const onAssets = {
     channelMoved: (handler, options) => assetTrigger(["channelMoved"], handler, options),
 };
 const assetTrigger = (events, handler, options) => define({ kind: "assets", events, channel: options?.channel }, (e, ctx) => (options?.channel && e.channel !== options.channel ? null : handler(e, ctx)), options);
+/**
+ * Realtime triggers: a list closed (by hand, by a function, or idle: build the session's outcome from it). With a path
+ * pattern (`sessions/{session}`), only those lists'. Needs Winche Server 4.1.
+ */
+export const onRealtime = {
+    closed: (pathOrHandler, handler, options) => typeof pathOrHandler === "string"
+        ? define({ kind: "realtime", events: ["closed"], path: pathOrHandler }, handler, options)
+        : define({ kind: "realtime", events: ["closed"] }, pathOrHandler, handler),
+};
 /** Runs on a schedule: a cron expression ("minute hour day month weekday"), in UTC unless timeZone is given. */
 export const schedule = (cron, handler, options) => define({ kind: "schedule", cron, timeZone: options?.timeZone }, handler, options);
 /** Called by apps (the SDKs' functions.call("name", data)); returns JSON to the caller. */

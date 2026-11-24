@@ -575,6 +575,77 @@ export declare class Assets {
         size: number;
     }[]>;
 }
+/** An item to append: its key (appending it again never duplicates it) and payload (bytes, or any JSON value). */
+export interface RealtimeItemIn {
+    key: string;
+    payload: Uint8Array | Json;
+}
+/** An item in a list: its key, position (the same order for everyone), when, by whom, and payload. */
+export interface RealtimeItem {
+    key: string;
+    position: number;
+    at: Date;
+    by: string | null;
+    payload: Uint8Array;
+    json(): unknown;
+}
+/** A list: open (takes items) or closed (reads only). */
+export interface RealtimeListInfo {
+    path: string;
+    state: "open" | "closed";
+    count: number;
+    bytes: number;
+    openedAt: Date;
+    closedAt: Date | null;
+}
+export declare class RealtimeList {
+    private readonly call;
+    readonly path: string;
+    /** @internal */ constructor(call: Call, path: string);
+    /** Appends items, all or none (with the server's rights): their positions. */
+    append(items: RealtimeItemIn[]): Promise<number[]>;
+    /** Up to `limit` items after position `after`, and the list (null when there's none). */
+    read(options?: {
+        after?: number;
+        limit?: number;
+    }): Promise<{
+        items: RealtimeItem[];
+        list: RealtimeListInfo | null;
+    }>;
+    /** Opens the list. */
+    open(): Promise<RealtimeListInfo>;
+    /** Closes the list: no more items; it still reads. */
+    close(): Promise<RealtimeListInfo>;
+}
+export declare class RealtimeChannel {
+    private readonly call;
+    readonly path: string;
+    readonly name: string;
+    /** @internal */ constructor(call: Call, path: string, name: string);
+    /** Publishes to everyone listening now (bytes, or any JSON value). Never kept. */
+    publish(payload: Uint8Array | Json): Promise<void>;
+}
+export declare class RealtimePresence {
+    private readonly call;
+    readonly path: string;
+    /** @internal */ constructor(call: Call, path: string);
+    /** Who's connected at the path now. */
+    members(): Promise<{
+        uid: string | null;
+        data: {
+            [k: string]: Json;
+        } | null;
+        joinedAt: Date;
+    }[]>;
+}
+/** Winche Realtime: lists, channels and presence, with the server's rights. */
+export declare class Realtime {
+    private readonly call;
+    /** @internal */ constructor(call: Call);
+    list(path: string): RealtimeList;
+    channel(path: string, name: string): RealtimeChannel;
+    presence(path: string): RealtimePresence;
+}
 export declare class Functions {
     private readonly send;
     /** @internal */ constructor(send: Call);
@@ -595,6 +666,7 @@ export declare class Admin {
     readonly files: Files;
     readonly auth: Auth;
     readonly assets: Assets;
+    readonly realtime: Realtime;
     readonly functions: Functions;
     /** @internal */ constructor(transport: Call);
     /**
@@ -635,6 +707,8 @@ export declare const files: Files;
 export declare const auth: Auth;
 /** The app's assets (releases and channels). */
 export declare const assets: Assets;
+/** Realtime lists, channels and presence. */
+export declare const realtime: Realtime;
 /** Calling callables. */
 export declare const functions: Functions;
 /** The same API acting as one of the app's users: their access rules apply. */

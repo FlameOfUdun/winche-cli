@@ -54,7 +54,7 @@ internal sealed class ProjectConfig
     [JsonIgnore] public string Directory { get; private set; } = "";
     [JsonIgnore] public string? FilePath { get; private set; }
 
-    public static readonly string[] Subsystems = ["database", "storage", "assets"];
+    public static readonly string[] Subsystems = ["database", "storage", "assets", "realtime"];
 
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {

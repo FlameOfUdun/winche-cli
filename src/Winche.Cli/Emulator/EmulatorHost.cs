@@ -41,6 +41,7 @@ internal sealed record EmulatorOptions
     public string? DatabaseRules { get; init; }
     public string? StorageRules { get; init; }
     public string? AssetsRules { get; init; }
+    public string? RealtimeRules { get; init; }
     /// <summary>An assets folder to publish at start and again whenever it's saved, to <see cref="AssetsChannel"/>.</summary>
     public string? Assets { get; init; }
     public string AssetsChannel { get; init; } = "production";
@@ -96,6 +97,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         var databaseRules = Load(options.DatabaseRules, "database", output);
         var storageRules = Load(options.StorageRules, "storage", output);
         var assetsRules = Load(options.AssetsRules, "assets", output);
+        var realtimeRules = Load(options.RealtimeRules, "realtime", output);
 
         PostgreSqlContainer? postgres = null;
         var connection = options.ConnectionString;
@@ -184,6 +186,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         Winche.Functions.Storage.StorageFunctionsExtensions.AddWincheFunctionsForStorage(builder.Services);
         Winche.Functions.Auth.AuthFunctionsExtensions.AddWincheFunctionsForAuth(builder.Services);
         Winche.Functions.Assets.AssetsFunctionsExtensions.AddWincheFunctionsForAssets(builder.Services);
+        Winche.Functions.Realtime.RealtimeFunctionsExtensions.AddWincheFunctionsForRealtime(builder.Services);
         builder.Services.AddWincheDatabase(o =>
         {
             o.ConnectionString = connection;
@@ -215,6 +218,13 @@ internal sealed class EmulatorHost : IAsyncDisposable
             o.UseRules(assetsRules);
             o.UseArchive(sp => sp.GetRequiredService<FileSystemArchive>());
         });
+        // Realtime: lists, channels and presence over their own socket, in the same Postgres.
+        Winche.Realtime.ServiceCollectionExtensions.AddWincheRealtime(builder.Services, o =>
+        {
+            o.ConnectionString = connection;
+            o.UseRules(realtimeRules);
+        });
+        Winche.Realtime.AspNetCore.RealtimeSocketExtensions.AddWincheRealtimeWsApi(builder.Services);
         builder.Services.AddCors(c => c.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
         var app = builder.Build();
@@ -236,11 +246,13 @@ internal sealed class EmulatorHost : IAsyncDisposable
         app.MapWincheAuth();
         Winche.Functions.FunctionsEndpoints.MapWincheFunctions(app);
         app.MapWincheAssets();
+        Winche.Realtime.AspNetCore.RealtimeSocketExtensions.MapWincheRealtimeWsApi(app);
         // GET /.well-known/winche, for winche configure: every service runs here; any app id is taken as given (the
         // emulators keep no list of apps).
         var authOptions = app.Services.GetService<Winche.Auth.WincheAuthOptions>();
         app.MapWincheAppSetup(http => new WincheAppSetup(options.ProjectId, null, WincheAppSetup.BaseUrlOf(http.Request),
-            [new("database", "/documents/v1", "/documents/v1/ws"), new("storage", "/files/v1"), new("auth", "/auth/v1"), new("functions", "/functions/v1"), new("assets", "/assets/v1")],
+            [new("database", "/documents/v1", "/documents/v1/ws"), new("storage", "/files/v1"), new("auth", "/auth/v1"), new("functions", "/functions/v1"), new("assets", "/assets/v1"),
+             new("realtime", "/realtime/v1", "/realtime/v1/ws")],
             [.. (authOptions?.IdentityProviders ?? []).Select(p => new WincheAppSetupProvider(p.Name, p.Kind, p.DisplayName ?? p.Name, [.. p.Audiences]))],
             http.Request.Query["app"].FirstOrDefault() is { Length: > 0 } appId ? new WincheAppSetupApp(appId, appId) : null));
 
@@ -262,6 +274,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         host.Watch(options.DatabaseRules, WincheDatabaseKeys.RuleEngine);
         host.Watch(options.StorageRules, WincheStorageKeys.RULE_ENGINE_KEY);
         host.Watch(options.AssetsRules, AssetsServiceCollectionExtensions.RulesKey);
+        host.Watch(options.RealtimeRules, Winche.Realtime.ServiceCollectionExtensions.RulesKey);
         if (options.Assets is { } assets) await host.WatchAssetsAsync(assets, options.AssetsChannel);
         if (options.Functions is { } folder) await host.WatchFunctionsAsync(folder, options.Pages, options.Plugins, ct);
         return host;
@@ -286,6 +299,7 @@ internal sealed class EmulatorHost : IAsyncDisposable
         _out.WriteLine($"  Auth              {ProjectUrl}/auth/v1   (sign up, sign in, anonymous; or `winche emulators token <uid>`)");
         _out.WriteLine($"  Functions         {ProjectUrl}/functions/v1/call/<name>   (from the functions folder; winche functions init makes one)");
         _out.WriteLine($"  Assets            {ProjectUrl}/assets/v1/channels/<channel>   (the assets folder, on save; winche assets init makes one)");
+        _out.WriteLine($"  Realtime          {ProjectUrl.Replace("http", "ws")}/realtime/v1/ws   (lists, channels, presence; realtime.rules)");
         _out.WriteLine($"  Integrity         {IntegrityMode switch { "enforce" => "enforced: requests without a token are refused", "off" => "off", _ => "monitored: tokens read, never required" }}   (any proof gets a token here; --integrity off|monitor|enforce)");
         _out.WriteLine($"  Postgres          {(TemporaryDatabase ? "temporary (gone when the emulator stops)" : "the one you passed with --pg")}");
         _out.WriteLine();

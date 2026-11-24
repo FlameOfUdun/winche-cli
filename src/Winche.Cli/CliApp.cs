@@ -751,6 +751,7 @@ internal static partial class CliApp
                 DatabaseRules = Rules("database"),
                 StorageRules = Rules("storage"),
                 AssetsRules = Rules("assets"),
+                RealtimeRules = Rules("realtime"),
                 Assets = AssetsDir(null) is var adir && Directory.Exists(adir) ? adir : null,
                 AssetsChannel = AssetsChannel(),
                 Functions = FunctionsDir(null) is var fdir && Directory.Exists(fdir) ? fdir : null,

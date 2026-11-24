@@ -1291,6 +1291,127 @@ var Assets = class {
     }));
   }
 };
+var toBase64 = (bytes) => {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+};
+var fromBase64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+var jsonBytes = (value) => new TextEncoder().encode(JSON.stringify(value));
+var listInfo = (l) => l ? {
+  ...l,
+  openedAt: new Date(l.openedAt),
+  closedAt: l.closedAt ? new Date(l.closedAt) : null
+} : null;
+var item = (i) => {
+  const payload = fromBase64(i.payload);
+  return {
+    key: i.key,
+    position: i.position,
+    at: new Date(i.at),
+    by: i.by ?? null,
+    payload,
+    json: () => JSON.parse(new TextDecoder().decode(payload))
+  };
+};
+var RealtimeList = class {
+  call;
+  path;
+  /** @internal */
+  constructor(call, path) {
+    this.call = call;
+    this.path = path;
+  }
+  /** Appends items, all or none (with the server's rights): their positions. */
+  async append(items) {
+    const wire = items.map((i) => ({
+      key: i.key,
+      payload: toBase64(i.payload instanceof Uint8Array ? i.payload : jsonBytes(i.payload))
+    }));
+    return (await this.call("realtime.append", {
+      path: this.path,
+      items: wire
+    })).positions;
+  }
+  /** Up to `limit` items after position `after`, and the list (null when there's none). */
+  async read(options) {
+    const r = await this.call("realtime.read", {
+      path: this.path,
+      after: options?.after ?? 0,
+      limit: options?.limit ?? 500
+    });
+    return {
+      items: r.items.map(item),
+      list: listInfo(r.list)
+    };
+  }
+  /** Opens the list. */
+  async open() {
+    return listInfo((await this.call("realtime.open", {
+      path: this.path
+    })).list);
+  }
+  /** Closes the list: no more items; it still reads. */
+  async close() {
+    return listInfo((await this.call("realtime.close", {
+      path: this.path
+    })).list);
+  }
+};
+var RealtimeChannel = class {
+  call;
+  path;
+  name;
+  /** @internal */
+  constructor(call, path, name) {
+    this.call = call;
+    this.path = path;
+    this.name = name;
+  }
+  /** Publishes to everyone listening now (bytes, or any JSON value). Never kept. */
+  async publish(payload) {
+    await this.call("realtime.publish", {
+      path: this.path,
+      channel: this.name,
+      payload: toBase64(payload instanceof Uint8Array ? payload : jsonBytes(payload))
+    });
+  }
+};
+var RealtimePresence = class {
+  call;
+  path;
+  /** @internal */
+  constructor(call, path) {
+    this.call = call;
+    this.path = path;
+  }
+  /** Who's connected at the path now. */
+  async members() {
+    return (await this.call("realtime.members", {
+      path: this.path
+    })).map((m) => ({
+      uid: m.uid ?? null,
+      data: m.data ?? null,
+      joinedAt: new Date(m.joinedAt)
+    }));
+  }
+};
+var Realtime = class {
+  call;
+  /** @internal */
+  constructor(call) {
+    this.call = call;
+  }
+  list(path) {
+    return new RealtimeList(this.call, path);
+  }
+  channel(path, name) {
+    return new RealtimeChannel(this.call, path, name);
+  }
+  presence(path) {
+    return new RealtimePresence(this.call, path);
+  }
+};
 var Functions = class {
   send;
   /** @internal */
@@ -1311,6 +1432,7 @@ var Admin = class _Admin {
   files;
   auth;
   assets;
+  realtime;
   functions;
   /** @internal */
   constructor(transport) {
@@ -1319,6 +1441,7 @@ var Admin = class _Admin {
     this.files = new Files(transport);
     this.auth = new Auth(transport);
     this.assets = new Assets(transport);
+    this.realtime = new Realtime(transport);
     this.functions = new Functions(transport);
   }
   /**
@@ -1425,6 +1548,7 @@ var documents = signedIn.documents;
 var files = signedIn.files;
 var auth = signedIn.auth;
 var assets = signedIn.assets;
+var realtime = signedIn.realtime;
 var functions = signedIn.functions;
 var as = (user) => signedIn.as(user);
 export {
@@ -1451,6 +1575,10 @@ export {
   PROTOCOL,
   Query,
   QuerySnapshot,
+  Realtime,
+  RealtimeChannel,
+  RealtimeList,
+  RealtimePresence,
   Transaction,
   UserReference,
   UserSnapshot,
@@ -1468,5 +1596,6 @@ export {
   files,
   functions,
   initializeAdmin,
+  realtime,
   userData
 };
