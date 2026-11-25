@@ -1298,6 +1298,7 @@ var toBase64 = (bytes) => {
 };
 var fromBase64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 var jsonBytes = (value) => new TextEncoder().encode(JSON.stringify(value));
+var payloadBytes = (value) => value instanceof Uint8Array ? value : value instanceof ArrayBuffer ? new Uint8Array(value) : ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength) : jsonBytes(value);
 var listInfo = (l) => l ? {
   ...l,
   openedAt: new Date(l.openedAt),
@@ -1326,14 +1327,14 @@ var RealtimeList = class {
   async append(items) {
     const wire = items.map((i) => ({
       key: i.key,
-      payload: toBase64(i.payload instanceof Uint8Array ? i.payload : jsonBytes(i.payload))
+      payload: toBase64(payloadBytes(i.payload))
     }));
     return (await this.call("realtime.append", {
       path: this.path,
       items: wire
     })).positions;
   }
-  /** Up to `limit` items after position `after`, and the list (null when there's none). */
+  /** Up to `limit` items after position `after`, the list (null when there's none), and whether more follow (`more`: read on after the last). */
   async read(options) {
     const r = await this.call("realtime.read", {
       path: this.path,
@@ -1342,7 +1343,8 @@ var RealtimeList = class {
     });
     return {
       items: r.items.map(item),
-      list: listInfo(r.list)
+      list: listInfo(r.list),
+      more: r.more === true
     };
   }
   /** Opens the list. */
@@ -1373,7 +1375,7 @@ var RealtimeChannel = class {
     await this.call("realtime.publish", {
       path: this.path,
       channel: this.name,
-      payload: toBase64(payload instanceof Uint8Array ? payload : jsonBytes(payload))
+      payload: toBase64(payloadBytes(payload))
     });
   }
 };

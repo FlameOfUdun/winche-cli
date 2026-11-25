@@ -578,7 +578,7 @@ export declare class Assets {
 /** An item to append: its key (appending it again never duplicates it) and payload (bytes, or any JSON value). */
 export interface RealtimeItemIn {
     key: string;
-    payload: Uint8Array | Json;
+    payload: Uint8Array | ArrayBuffer | ArrayBufferView | Json;
 }
 /** An item in a list: its key, position (the same order for everyone), when, by whom, and payload. */
 export interface RealtimeItem {
@@ -604,13 +604,14 @@ export declare class RealtimeList {
     /** @internal */ constructor(call: Call, path: string);
     /** Appends items, all or none (with the server's rights): their positions. */
     append(items: RealtimeItemIn[]): Promise<number[]>;
-    /** Up to `limit` items after position `after`, and the list (null when there's none). */
+    /** Up to `limit` items after position `after`, the list (null when there's none), and whether more follow (`more`: read on after the last). */
     read(options?: {
         after?: number;
         limit?: number;
     }): Promise<{
         items: RealtimeItem[];
         list: RealtimeListInfo | null;
+        more: boolean;
     }>;
     /** Opens the list. */
     open(): Promise<RealtimeListInfo>;
@@ -623,7 +624,7 @@ export declare class RealtimeChannel {
     readonly name: string;
     /** @internal */ constructor(call: Call, path: string, name: string);
     /** Publishes to everyone listening now (bytes, or any JSON value). Never kept. */
-    publish(payload: Uint8Array | Json): Promise<void>;
+    publish(payload: Uint8Array | ArrayBuffer | ArrayBufferView | Json): Promise<void>;
 }
 export declare class RealtimePresence {
     private readonly call;

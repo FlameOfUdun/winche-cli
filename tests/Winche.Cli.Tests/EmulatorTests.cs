@@ -68,6 +68,7 @@ public sealed class EmulatorTests(PostgresFixture fx) : IDisposable
         await using var host = await Start(log, databaseRules: rules, integrity: "enforce");
         host.PrintBanner(rules, null);
         Assert.Contains("Integrity         enforced", log.ToString());
+        Assert.Equal(HttpStatusCode.Forbidden, (await new HttpClient().GetAsync(host.BaseUrl.TrimEnd('/') + "/realtime/v1/ws")).StatusCode);   // Realtime too
         using var client = As(host, "u1");
 
         var refused = await Put(client, "notes/a", "x");

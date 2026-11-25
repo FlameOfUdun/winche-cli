@@ -17,7 +17,7 @@ namespace Winche.Cli.Emulator;
 internal sealed class EmulatorIntegrity(string mode, TextWriter output, bool quiet, TimeProvider? time = null)
 {
     public const string Header = "X-Winche-Integrity", QueryParameter = "winche_integrity";
-    private static readonly string[] Products = ["/documents/v1", "/files/v1", "/auth/v1", "/functions/v1", "/assets/v1"];
+    private static readonly string[] Products = ["/documents/v1", "/files/v1", "/auth/v1", "/functions/v1", "/assets/v1", "/realtime/v1"];
     private readonly ConcurrentDictionary<string, (string App, string Provider, DateTimeOffset Expires)> _tokens = new();
     private readonly TimeProvider _time = time ?? TimeProvider.System;
 

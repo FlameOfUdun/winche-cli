@@ -211,7 +211,6 @@ export interface BeforeSignInEvent {
     provider: string;
     ipAddress: string | null;
 }
-/** A release published (released) or a channel pointed at a release (channelMoved). */
 /** A Realtime list closed (by hand, by a function, or idle): what it holds. */
 export interface RealtimeClosedEvent {
     type: "closed";
@@ -232,6 +231,7 @@ export interface RealtimeClosedEvent {
     id: string;
     at: Date;
 }
+/** A release published (released) or a channel pointed at a release (channelMoved). */
 export interface AssetEvent {
     type: "released" | "channelMoved";
     /** The release published, or the one the channel points at now. */
