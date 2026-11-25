@@ -769,7 +769,7 @@ internal static partial class CliApp
             await using var host = await Emulator.EmulatorHost.StartAsync(options, env.Out, ct);
             if (command is null)
             {
-                host.PrintBanner(options.DatabaseRules, options.StorageRules, options.AssetsRules);
+                host.PrintBanner(options.DatabaseRules, options.StorageRules, options.AssetsRules, options.RealtimeRules);
                 env.Out.WriteLine("Press Ctrl+C to stop.");
                 using var either = CancellationTokenSource.CreateLinkedTokenSource(ct, host.Stopping);
                 try { await Task.Delay(Timeout.Infinite, either.Token); }

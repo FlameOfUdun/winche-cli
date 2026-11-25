@@ -286,9 +286,9 @@ internal sealed class EmulatorHost : IAsyncDisposable
     /// <summary>How Integrity treats requests here (--integrity).</summary>
     public string IntegrityMode { get; private init; } = "monitor";
 
-    public void PrintBanner(string? databaseRules, string? storageRules, string? assetsRules = null)
+    public void PrintBanner(string? databaseRules, string? storageRules, string? assetsRules = null, string? realtimeRules = null)
     {
-        var rules = string.Join(", ", new[] { databaseRules, storageRules, assetsRules }.Where(r => r is not null).Select(r => Path.GetFileName(r!)));
+        var rules = string.Join(", ", new[] { databaseRules, storageRules, assetsRules, realtimeRules }.Where(r => r is not null).Select(r => Path.GetFileName(r!)));
         _out.WriteLine();
         _out.WriteLine($"Winche emulator is running{(rules.Length > 0 ? $" — rules from {rules}, reloaded on save" : " — no rules files, so everything is denied")}");
         _out.WriteLine();
