@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>3.3.1</Version>
+    <Version>3.3.2</Version>
     <Authors>Ehsan Rashidi</Authors>
     <Copyright>Copyright © 2026 Ehsan Rashidi</Copyright>
     <PackageProjectUrl>https://github.com/FlameOfUdun/winche-cli</PackageProjectUrl>
