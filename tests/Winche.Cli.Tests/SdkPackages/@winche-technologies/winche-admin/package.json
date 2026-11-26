@@ -1,6 +1,6 @@
 {
   "name": "@winche-technologies/winche-admin",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "description": "A Winche project's data (documents, files, the app's users, assets, functions) from functions, console pages and other servers.",
   "type": "module",
   "main": "./dist/index.js",

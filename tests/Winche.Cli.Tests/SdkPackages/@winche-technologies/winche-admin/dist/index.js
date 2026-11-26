@@ -1298,7 +1298,7 @@ var toBase64 = (bytes) => {
 };
 var fromBase64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 var jsonBytes = (value) => new TextEncoder().encode(JSON.stringify(value));
-var payloadBytes = (value) => value instanceof Uint8Array ? value : value instanceof ArrayBuffer ? new Uint8Array(value) : ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength) : jsonBytes(value);
+var payloadBytes = (value) => value instanceof Uint8Array ? value : value instanceof ArrayBuffer ? new Uint8Array(value) : typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer ? new Uint8Array(value).slice() : ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength) : jsonBytes(value);
 var listInfo = (l) => l ? {
   ...l,
   openedAt: new Date(l.openedAt),
